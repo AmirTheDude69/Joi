@@ -1,0 +1,4 @@
+interface:
+  display_name: "Schedule"
+  short_description: "Find calendar options and preview event changes"
+  default_prompt: "Use $joi-schedule to find a time and prepare a calendar change for approval."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Joi Setup"
+  short_description: "Configure the Joi service, pet, and connections"
+  default_prompt: "Use $joi-setup to configure Joi safely in this Codex installation."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Meeting Prep"
+  short_description: "Prepare context, questions, and follow-up actions"
+  default_prompt: "Use $joi-meeting-prep to prepare me for my next meeting."

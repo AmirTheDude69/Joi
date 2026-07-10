@@ -1,0 +1,4 @@
+interface:
+  display_name: "Weekly Review"
+  short_description: "Review wins, loose ends, and next priorities"
+  default_prompt: "Use $joi-weekly-review to lead a concise weekly review."

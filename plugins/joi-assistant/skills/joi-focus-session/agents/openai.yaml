@@ -1,0 +1,4 @@
+interface:
+  display_name: "Focus Session"
+  short_description: "Run a focused work block with a gentle recap"
+  default_prompt: "Use $joi-focus-session to help me choose one outcome and focus."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Inbox Brief"
+  short_description: "Triage Gmail and surface actionable threads"
+  default_prompt: "Use $joi-inbox-brief to summarize my inbox without sending anything."
