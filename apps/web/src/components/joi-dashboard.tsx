@@ -525,12 +525,12 @@ export function JoiDashboard() {
                     <div><p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-stone-400">Connectors</p><div className="grid gap-3 sm:grid-cols-3">{connectors.map((connector) => <div key={connector.id} className="rounded-xl border border-stone-200 bg-white p-4"><div className="flex items-center justify-between"><Database className="size-4 text-orange-700" /><Badge variant="secondary" className="capitalize">{connector.status}</Badge></div><p className="mt-3 font-medium">{connector.label}</p><p className="mt-1 text-xs text-stone-400">Minimum scopes · mock data only</p></div>)}</div></div>
                     <Separator />
                     <div>
-                      <div className="mb-3 flex items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-400">MVP capability selection</p><p className="mt-1 text-xs text-stone-500">Disable features you do not want. Later-phase IDs stay locked until implemented.</p></div><Badge variant="secondary">{capabilities.filter((item) => item.release === "mvp" && item.enabled).length} enabled</Badge></div>
+                      <div className="mb-3 flex items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-400">MVP capability selection</p><p className="mt-1 text-xs text-stone-500">Implemented beta features are selectable. Planned MVP release gates stay locked until they are real.</p></div><Badge variant="secondary">{capabilities.filter((item) => item.release === "mvp" && item.enabled).length} enabled</Badge></div>
                       <div className="grid max-h-72 gap-2 overflow-y-auto rounded-xl border border-stone-200 bg-white p-3 sm:grid-cols-2">
                         {capabilities.filter((item) => item.release === "mvp").map((capability) => (
                           <label key={capability.id} className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-orange-50">
-                            <span><span className="font-mono text-xs font-medium text-stone-800">{capability.id}</span><span className="ml-2 text-[11px] capitalize text-stone-400">{capability.group}</span></span>
-                            <Switch checked={capability.enabled} onCheckedChange={(enabled) => void setCapability(capability.id, enabled)} aria-label={`Toggle ${capability.id}`} />
+                            <span><span className="font-mono text-xs font-medium text-stone-800">{capability.id}</span><span className="ml-2 text-[11px] capitalize text-stone-400">{capability.group}</span>{capability.availability === "release_gate" && <Badge variant="secondary" className="ml-2">Gated</Badge>}</span>
+                            <Switch checked={capability.enabled} disabled={capability.availability !== "implemented_beta"} onCheckedChange={(enabled) => void setCapability(capability.id, enabled)} aria-label={`Toggle ${capability.id}`} />
                           </label>
                         ))}
                       </div>

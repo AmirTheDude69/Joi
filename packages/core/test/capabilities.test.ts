@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capabilityCatalog, mvpCapabilityIds } from "@joi/contracts";
+import { capabilityCatalog, implementedBetaCapabilityIds, mvpCapabilityIds } from "@joi/contracts";
 import { JoiService } from "../src/service.js";
 
 describe("capability flags", () => {
@@ -7,7 +7,9 @@ describe("capability flags", () => {
     const catalog = capabilityCatalog();
     expect(catalog).toHaveLength(131);
     expect(catalog.filter((item) => item.enabled).map((item) => item.id).sort())
-      .toEqual([...mvpCapabilityIds].sort());
+      .toEqual([...implementedBetaCapabilityIds].sort());
+    expect(catalog.filter((item) => item.release === "mvp")).toHaveLength(mvpCapabilityIds.size);
+    expect(catalog.find((item) => item.id === "BIZ-03")?.availability).toBe("release_gate");
     expect(catalog.find((item) => item.id === "AVA-05")?.enabled).toBe(false);
     expect(catalog.find((item) => item.id === "SURF-01")?.enabled).toBe(true);
   });
@@ -17,6 +19,7 @@ describe("capability flags", () => {
     expect(service.setCapability("alice", "PRO-01", false).enabled).toBe(false);
     expect(service.listCapabilities("alice").find((item) => item.id === "PRO-01")?.enabled).toBe(false);
     expect(service.listCapabilities("bob").find((item) => item.id === "PRO-01")?.enabled).toBe(true);
-    expect(() => service.setCapability("alice", "AVA-05", true)).toThrow("later-phase release gate");
+    expect(() => service.setCapability("alice", "AVA-05", true)).toThrow("release gate");
+    expect(() => service.setCapability("alice", "BIZ-03", true)).toThrow("release gate");
   });
 });

@@ -57,8 +57,8 @@ export class JoiService {
   setCapability(userId: string, capabilityId: string, enabled: boolean): CapabilityDescriptor {
     const current = this.listCapabilities(userId).find((item) => item.id === capabilityId);
     if (!current) throw new Error(`Unknown capability: ${capabilityId}`);
-    if (current.release === "later" && enabled) {
-      throw new Error(`${capabilityId} is a later-phase release gate and cannot be enabled in this build.`);
+    if (current.availability !== "implemented_beta" && enabled) {
+      throw new Error(`${capabilityId} is a release gate and cannot be enabled in this build.`);
     }
     this.store.setCapabilitySelection(userId, current.id as CapabilityId, enabled);
     this.store.appendAudit({

@@ -10,6 +10,7 @@
 - PostgreSQL/pgvector migration with row-level tenant policies and queue-ready automation fields.
 - Codex plugin manifest, ten skills, local MCP configuration, pet assets, and macOS/Linux/Windows installer scripts.
 - PWA chat, state-synchronized avatar, 16-direction gaze, tasks, memory, approval inbox, automation templates, settings, responsive layout, service worker, and reduced motion.
+- Capability flags distinguish implemented beta behavior from planned MVP release gates, preventing unavailable features from being enabled.
 
 ## Deliberate launch gates
 

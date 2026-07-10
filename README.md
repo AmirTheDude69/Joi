@@ -16,7 +16,7 @@ Joi always identifies as AI. It is inspired by a supplied character, not an impe
 - An installable Codex plugin with ten `$joi-*` skills and the animated pet package.
 - A Next.js PWA with chat, tasks, memory, approvals, routines, settings, and avatar state synchronization.
 - PostgreSQL/pgvector schema with row-level tenant isolation and a queue-ready automation table.
-- A 131-ID feature registry. The planned MVP IDs are enabled; later features remain disabled.
+- A 131-ID feature registry that separates the planned MVP from the implemented beta subset; unavailable features remain visibly gated.
 
 This is a runnable engineering beta, not a public-production release. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for the remaining release gates.
 

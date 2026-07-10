@@ -25,10 +25,21 @@ export const mvpCapabilityIds = new Set<CapabilityId>([
   "BIZ-01", "BIZ-02", "BIZ-03", "BIZ-04",
 ]);
 
+export const implementedBetaCapabilityIds = new Set<CapabilityId>([
+  "INT-01", "INT-05",
+  "MEM-01", "MEM-02", "MEM-03", "MEM-04", "MEM-05", "MEM-06",
+  "PRO-01", "PRO-02", "PRO-04", "PRO-05", "PRO-06", "PRO-07", "PRO-08", "PRO-09", "PRO-10", "PRO-11", "PRO-12",
+  "COM-01", "COM-02", "COM-03", "COM-04", "COM-05",
+  "AVA-01", "AVA-02", "AVA-03",
+  "SURF-01", "SURF-02",
+  "BIZ-04",
+]);
+
 export type CapabilityDescriptor = {
   id: CapabilityId;
   group: CapabilityGroup;
   release: "mvp" | "later";
+  availability: "implemented_beta" | "release_gate" | "later";
   enabled: boolean;
 };
 
@@ -38,7 +49,14 @@ export function capabilityCatalog(overrides: Partial<Record<CapabilityId, boolea
       id,
       group: group as CapabilityGroup,
       release: mvpCapabilityIds.has(id) ? "mvp" as const : "later" as const,
-      enabled: overrides[id] ?? mvpCapabilityIds.has(id),
+      availability: implementedBetaCapabilityIds.has(id)
+        ? "implemented_beta" as const
+        : mvpCapabilityIds.has(id)
+          ? "release_gate" as const
+          : "later" as const,
+      enabled: implementedBetaCapabilityIds.has(id)
+        ? (overrides[id] ?? true)
+        : false,
     })),
   );
 }
