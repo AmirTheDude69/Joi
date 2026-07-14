@@ -15,6 +15,7 @@ Joi always identifies as AI. It is inspired by a supplied character, not an impe
 - A stateless Streamable HTTP MCP server with `joi.*` tool namespaces.
 - An installable Codex plugin with ten `$joi-*` skills and the animated pet package.
 - A Next.js PWA with chat, tasks, memory, approvals, routines, settings, and avatar state synchronization.
+- A separate native macOS floating companion with an AssistiveTouch-style radial menu, Realtime voice, Pomodoro, Google search, Codex launching, and Apple Music/Spotify controls.
 - PostgreSQL/pgvector schema with row-level tenant isolation and a queue-ready automation table.
 - A 131-ID feature registry that separates the planned MVP from the implemented beta subset; unavailable features remain visibly gated.
 
@@ -89,11 +90,26 @@ codex plugin add joi-assistant@joi
 
 Then start the local agent, make `JOI_DEV_AUTH_TOKEN` available to the Codex process, install the bundled pet, restart Codex, and test `$joi-setup` in a new task.
 
+## Install the standalone macOS app
+
+Build the universal DMG on macOS:
+
+```bash
+pnpm build:macos
+```
+
+Or use the checked-in private-beta installer: [Joi 0.3.0 universal DMG](releases/Joi-0.3.0-macOS-Universal.dmg).
+
+Open `dist/Joi-0.3.0-macOS-Universal.dmg`, drag Joi to Applications, then Control-click **Joi** and choose **Open** on first launch. Click the avatar to reveal the six controls. Add your own OpenAI API key in Settings; it is stored in macOS Keychain and is not included in the app or repository.
+
+The voice assistant uses [`gpt-realtime-2.1`](https://developers.openai.com/api/docs/models/gpt-realtime-2.1) over the [Realtime API](https://developers.openai.com/api/docs/guides/realtime). See the full [macOS walkthrough](apps/macos/README.md).
+
 ## Repository layout
 
 ```text
 apps/agent                 Node.js agent, REST/SSE API, and MCP server
 apps/web                   Next.js installable PWA
+apps/macos                 Native floating macOS companion and settings
 packages/contracts         Zod schemas, events, and capability flags
 packages/core              Policy, tenant store, connectors, and services
 plugins/joi-assistant      Codex plugin, skills, scripts, and pet assets
