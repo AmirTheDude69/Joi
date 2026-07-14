@@ -61,6 +61,10 @@ struct FloatingCompanionView: View {
             .onTapGesture { model.toggleExpanded() }
             .gesture(
                 DragGesture(minimumDistance: 6, coordinateSpace: .global)
+                    // The AppKit window controller anchors this first translation to
+                    // the screen-space mouse origin, then follows NSEvent.mouseLocation.
+                    // Keeping the SwiftUI gesture as a signal avoids feedback from the
+                    // window moving underneath this view.
                     .onChanged { model.onWindowDrag?($0.translation) }
                     .onEnded { _ in model.onWindowDragEnded?() }
             )
@@ -268,20 +272,30 @@ private struct FramelessActionButton: View {
 
     var body: some View {
         Button(action: handler) {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 25, weight: .semibold))
-                    .frame(height: 29)
-                Text(label)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .lineLimit(1)
+            ZStack {
+                // A nearly transparent fill gives SF Symbols with hollow centers
+                // (notably the magnifier) one continuous hit-test surface without
+                // adding any visible circle or frame.
+                Rectangle()
+                    .fill(Color.white.opacity(0.001))
+
+                VStack(spacing: 4) {
+                    Image(systemName: icon)
+                        .font(.system(size: 25, weight: .semibold))
+                        .frame(height: 29)
+                    Text(label)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(isActive ? Color.orange : Color.white)
+                .shadow(color: .black.opacity(0.92), radius: 3, y: 1)
             }
-            .foregroundStyle(isActive ? Color.orange : Color.white)
             .frame(width: 86, height: 68)
-            .contentShape(Rectangle())
-            .shadow(color: .black.opacity(0.92), radius: 3, y: 1)
+            .contentShape(.interaction, Rectangle())
         }
         .buttonStyle(.plain)
+        .frame(width: 86, height: 68)
+        .contentShape(.interaction, Rectangle())
         .help(help)
         .accessibilityLabel(help)
     }
@@ -349,10 +363,17 @@ private struct VoiceStatusPanel: View {
             }
 
             if case let .error(message) = model.voice.status {
-                Text(message)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
+                HStack(alignment: .top, spacing: 8) {
+                    Text(message)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
             } else if let warning = model.voice.lastWarning {
                 Text(warning)
                     .font(.caption2)
@@ -376,6 +397,11 @@ private struct VoiceStatusPanel: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.45), lineWidth: 0.7))
         .shadow(color: .black.opacity(0.22), radius: 12, y: 5)
+        .contentShape(Rectangle())
+        .onTapGesture { model.dismissVoiceError() }
+        .accessibilityAction(named: "Dismiss voice error") {
+            model.dismissVoiceError()
+        }
     }
 }
 
@@ -485,7 +511,7 @@ private struct MusicHoneycombCluster: View {
         MusicBubble(action: .favorite, icon: "heart.fill", size: 27, x: 45, y: 14, color: .pink),
         MusicBubble(action: .next, icon: "forward.fill", size: 31, x: 80, y: 31, color: .blue),
         MusicBubble(action: .shuffle, icon: "shuffle", size: 27, x: 23, y: 70, color: .purple),
-        MusicBubble(action: .playPause, icon: "playpause.fill", size: 40, x: 57, y: 57, color: .red),
+        MusicBubble(action: .playPause, icon: "pause.fill", size: 40, x: 57, y: 57, color: .red),
         MusicBubble(action: .lyrics, icon: "quote.bubble.fill", size: 25, x: 91, y: 68, color: .cyan),
     ]
 
@@ -498,10 +524,8 @@ private struct MusicHoneycombCluster: View {
                             .font(.system(size: max(9, bubble.size * 0.36), weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: bubble.size, height: bubble.size)
-                            .background(bubble.color.gradient, in: Circle())
-                            .shadow(color: .black.opacity(0.32), radius: 4, y: 2)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(GlassMusicButtonStyle(accent: bubble.color))
                     .contentShape(Circle())
                     .position(x: bubble.x, y: bubble.y)
                     .help(bubble.help)
@@ -519,6 +543,37 @@ private struct MusicHoneycombCluster: View {
     }
 }
 
+private struct GlassMusicButtonStyle: ButtonStyle {
+    let accent: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        Circle()
+                            .fill(accent.opacity(configuration.isPressed ? 0.10 : 0.025))
+                    }
+                    .overlay {
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.58), .white.opacity(0.10)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.6
+                            )
+                    }
+            }
+            .shadow(color: accent.opacity(configuration.isPressed ? 0.04 : 0.07), radius: 3, y: 1)
+            .shadow(color: .black.opacity(0.28), radius: 4, y: 2)
+            .scaleEffect(configuration.isPressed ? 0.91 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 private struct MusicBubble: Identifiable {
     let action: MusicController.Action
     let icon: String
@@ -532,7 +587,7 @@ private struct MusicBubble: Identifiable {
     var help: String {
         switch action {
         case .previous: "Previous track"
-        case .playPause: "Play or pause"
+        case .playPause: "Pause current media"
         case .next: "Next track"
         case .favorite: "Favorite current track"
         case .shuffle: "Toggle shuffle"

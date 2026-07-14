@@ -152,7 +152,7 @@ final class RealtimeVoiceService: ObservableObject {
                         ],
                     ],
                     "output": [
-                        "format": ["type": "audio/pcm"],
+                        "format": ["type": "audio/pcm", "rate": 24_000],
                         "voice": voice,
                         "speed": 1.04,
                     ],

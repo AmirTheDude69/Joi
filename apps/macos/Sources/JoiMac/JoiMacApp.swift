@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import SwiftUI
+@preconcurrency import UserNotifications
 
 @main
 struct JoiMacApp: App {
@@ -14,13 +15,14 @@ struct JoiMacApp: App {
 }
 
 @MainActor
-final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
     let model = AppModel()
 
     private var companionPanel: CompanionPanel?
     private var settingsWindow: NSWindow?
     private var statusItem: NSStatusItem?
     private var dragStartOrigin: NSPoint?
+    private var dragStartMouseLocation: NSPoint?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if CommandLine.arguments.contains("--self-test") {
@@ -42,6 +44,7 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
         NSApplication.shared.setActivationPolicy(.accessory)
+        UNUserNotificationCenter.current().delegate = self
         createCompanionPanel()
         createStatusItem()
         wireModel()
@@ -104,7 +107,7 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.dragPanel(translation: translation)
         }
         model.onWindowDragEnded = { [weak self] in
-            self?.dragStartOrigin = nil
+            self?.finishPanelDrag()
         }
     }
 
@@ -129,16 +132,32 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func dragPanel(translation: CGSize) {
         guard let panel = companionPanel else { return }
-        if dragStartOrigin == nil {
+
+        let currentMouseLocation = NSEvent.mouseLocation
+        if dragStartOrigin == nil || dragStartMouseLocation == nil {
             dragStartOrigin = panel.frame.origin
+            // SwiftUI's global coordinates are window-relative and have a
+            // downward-positive Y axis. Recover the screen-space mouse-down point
+            // from the first translation so the panel does not lag or jump when
+            // the drag crosses its recognition threshold.
+            dragStartMouseLocation = NSPoint(
+                x: currentMouseLocation.x - translation.width,
+                y: currentMouseLocation.y + translation.height
+            )
         }
-        guard let origin = dragStartOrigin else { return }
+        guard let origin = dragStartOrigin, let mouseOrigin = dragStartMouseLocation else { return }
+
         var frame = panel.frame
         frame.origin = NSPoint(
-            x: origin.x + translation.width,
-            y: origin.y - translation.height
+            x: origin.x + currentMouseLocation.x - mouseOrigin.x,
+            y: origin.y + currentMouseLocation.y - mouseOrigin.y
         )
-        panel.setFrame(constrained(frame), display: true)
+        panel.setFrameOrigin(constrained(frame).origin)
+    }
+
+    private func finishPanelDrag() {
+        dragStartOrigin = nil
+        dragStartMouseLocation = nil
     }
 
     private func constrained(_ frame: NSRect) -> NSRect {
@@ -181,6 +200,14 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func quit() {
         NSApplication.shared.terminate(nil)
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner])
     }
 }
 

@@ -21,11 +21,19 @@ enum JoiSelfTest {
         check(search?.host == "www.google.com" && searchValue == "Joi tiny assistant & macOS", "Google query encoding", failures: &failures)
         check(GoogleSearch.url(for: "   ") == nil, "blank searches are ignored", failures: &failures)
 
-        let timer = PomodoroTimer(seconds: 2)
+        var completionSoundCount = 0
+        var completionNotificationCount = 0
+        let timer = PomodoroTimer(
+            seconds: 2,
+            completionSound: { completionSoundCount += 1 },
+            completionNotification: { completionNotificationCount += 1 }
+        )
         timer.start()
-        timer.tick(notifyOnCompletion: false)
-        timer.tick(notifyOnCompletion: false)
+        timer.tick()
+        timer.tick()
         check(timer.state == .completed && timer.formattedRemaining == "00:00", "Pomodoro completion", failures: &failures)
+        check(completionSoundCount == 1, "Pomodoro completion emits one audible alert", failures: &failures)
+        check(completionNotificationCount == 1, "Pomodoro completion requests one notification", failures: &failures)
         timer.reset()
         check(timer.state == .idle && timer.formattedRemaining == "00:02", "Pomodoro reset", failures: &failures)
 
@@ -40,7 +48,12 @@ enum JoiSelfTest {
         check(output?["voice"] as? String == "shimmer", "default Joi voice", failures: &failures)
         check((session?["instructions"] as? String)?.contains("Always be transparent that you are an AI") == true, "AI disclosure prompt", failures: &failures)
         check(turnDetection?["type"] as? String == "semantic_vad" && turnDetection?["create_response"] as? Bool == true, "continuous semantic VAD", failures: &failures)
-        check(outputFormat?["type"] as? String == "audio/pcm", "Realtime PCM output", failures: &failures)
+        check(
+            outputFormat?["type"] as? String == "audio/pcm"
+                && outputFormat?["rate"] as? Int == 24_000,
+            "Realtime PCM output includes required 24 kHz rate",
+            failures: &failures
+        )
         check(SpriteAnimation.runningRight.row == 1 && SpriteAnimation.runningLeft.row == 2, "directional running rows", failures: &failures)
         check(SpriteAnimation.allCases.map(\.row) == Array(0 ... 8), "all standard animation rows mapped", failures: &failures)
         check(SpriteAnimation.allCases.map { $0.durations.count } == [7, 8, 8, 4, 5, 8, 6, 6, 6], "every populated standard frame is animated", failures: &failures)
@@ -49,13 +62,78 @@ enum JoiSelfTest {
         check(timer.remainingProgress == 1, "Pomodoro progress resets", failures: &failures)
 
         let music = MusicController()
-        check(music.script(for: .next, player: .music) == "tell application \"Music\" to next track", "Apple Music command", failures: &failures)
+        _ = MusicController.hasActiveSupportedMediaAudio()
+        _ = MusicController.currentNowPlayingBundleIdentifier()
+        check(
+            MusicController.systemMediaKey(for: .previous) == .previous
+                && MusicController.systemMediaKey(for: .playPause) == .playPause
+                && MusicController.systemMediaKey(for: .next) == .next,
+            "transport controls use system-wide media keys",
+            failures: &failures
+        )
+        check(
+            MusicController.systemMediaKey(for: .favorite) == nil
+                && MusicController.systemMediaKey(for: .shuffle) == nil
+                && MusicController.systemMediaKey(for: .lyrics) == nil,
+            "unsupported media keys use guarded feature fallbacks",
+            failures: &failures
+        )
+        check(
+            MusicController.eventData(for: .playPause, isKeyDown: true) == (16 << 16) | (0xA << 8)
+                && MusicController.eventData(for: .playPause, isKeyDown: false) == (16 << 16) | (0xB << 8)
+                && MusicController.eventModifierFlags(isKeyDown: true).rawValue == 0xA00
+                && MusicController.eventModifierFlags(isKeyDown: false).rawValue == 0xB00,
+            "media key down and up events are well formed",
+            failures: &failures
+        )
+        check(
+            MusicController.canControlTransport(activeSupportedMediaAudio: true)
+                && !MusicController.canControlTransport(activeSupportedMediaAudio: false),
+            "transport guard requires active supported media",
+            failures: &failures
+        )
+        check(
+            MusicController.isSupportedMediaBundleIdentifier("company.thebrowser.Browser.helper")
+                && MusicController.isSupportedMediaBundleIdentifier("com.spotify.client")
+                && !MusicController.isSupportedMediaBundleIdentifier("us.zoom.xos")
+                && !MusicController.isSupportedMediaBundleIdentifier("com.hnc.Discord"),
+            "media owner allowlist includes Arc and Spotify but excludes calls",
+            failures: &failures
+        )
+        check(
+            MusicController.isEligibleMediaOutput(
+                bundleIdentifier: "company.thebrowser.Browser",
+                isRunningOutput: true,
+                isRunningInput: false,
+                nowPlayingOwnerBundleIdentifier: "company.thebrowser.Browser"
+            )
+                && !MusicController.isEligibleMediaOutput(
+                    bundleIdentifier: "company.thebrowser.Browser",
+                    isRunningOutput: true,
+                    isRunningInput: true,
+                    nowPlayingOwnerBundleIdentifier: "company.thebrowser.Browser"
+                )
+                && !MusicController.isEligibleMediaOutput(
+                    bundleIdentifier: "us.zoom.xos",
+                    isRunningOutput: true,
+                    isRunningInput: false
+                )
+                && !MusicController.isEligibleMediaOutput(
+                    bundleIdentifier: "company.thebrowser.Browser.helper",
+                    isRunningOutput: true,
+                    isRunningInput: false,
+                    nowPlayingOwnerBundleIdentifier: "com.apple.Music"
+                ),
+            "transport output must match the real Now Playing owner",
+            failures: &failures
+        )
+        check(music.script(for: .next, player: .music).isEmpty, "transport controls cannot launch a named player", failures: &failures)
         check(music.script(for: .shuffle, player: .spotify) == "tell application \"Spotify\" to set shuffling to not shuffling", "Spotify command", failures: &failures)
         check(music.script(for: .favorite, player: .spotify).isEmpty, "Spotify read-only favorite is not misrepresented", failures: &failures)
 
         let suiteName = "JoiSelfTest-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        let panelTimer = PomodoroTimer(seconds: 1)
+        let panelTimer = PomodoroTimer(seconds: 1, completionSound: {}, completionNotification: {})
         let panelModel = AppModel(defaults: defaults, pomodoro: panelTimer)
         panelModel.togglePanel(.pomodoro)
         check(panelModel.activePanel == .pomodoro, "Focus panel opens", failures: &failures)
@@ -68,7 +146,7 @@ enum JoiSelfTest {
         defaults.removePersistentDomain(forName: suiteName)
 
         if failures.isEmpty {
-            print("Joi macOS self-test: 27 checks passed")
+            print("Joi macOS self-test: 35 checks passed")
         } else {
             failures.forEach { print("FAIL: \($0)") }
             print("Joi macOS self-test: \(failures.count) failure(s)")

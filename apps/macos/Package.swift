@@ -9,8 +9,16 @@ let package = Package(
         .executable(name: "Joi", targets: ["JoiMac"]),
     ],
     targets: [
+        .target(
+            name: "MediaRemoteShim",
+            path: "Sources/MediaRemoteShim",
+            publicHeadersPath: "include",
+            cSettings: [.unsafeFlags(["-fblocks"])],
+            linkerSettings: [.linkedLibrary("objc")]
+        ),
         .executableTarget(
             name: "JoiMac",
+            dependencies: ["MediaRemoteShim"],
             path: "Sources/JoiMac"
         ),
     ]

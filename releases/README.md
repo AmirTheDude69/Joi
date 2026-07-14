@@ -1,5 +1,13 @@
 # Joi macOS installers
 
+## Joi 0.4.1
+
+- File: `Joi-0.4.1-macOS-Universal.dmg`
+- macOS: 14 or later
+- Architectures: Apple Silicon and Intel
+- SHA-256: `844cc66c515f791a6d1550af9d512d164da4397a234020c494f9322c06569ed5`
+- Highlights: live-verified Realtime audio schema, dismissible voice errors, reliable full-area Search hit testing, smoother screen-space dragging, audible Focus completion, Now Playing-owner-matched media controls, and translucent glass music buttons.
+
 ## Joi 0.4.0
 
 - File: `Joi-0.4.0-macOS-Universal.dmg`

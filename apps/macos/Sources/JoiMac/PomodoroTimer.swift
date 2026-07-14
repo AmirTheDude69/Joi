@@ -5,6 +5,8 @@ import Foundation
 
 @MainActor
 final class PomodoroTimer: ObservableObject {
+    typealias CompletionEffect = @MainActor () -> Void
+
     enum State: Equatable {
         case idle
         case running
@@ -16,17 +18,32 @@ final class PomodoroTimer: ObservableObject {
     @Published private(set) var remainingSeconds: Int
     private(set) var configuredSeconds: Int
     private let clock = ContinuousClock()
+    private let completionSoundEffect: CompletionEffect
+    private let completionNotificationEffect: CompletionEffect
     private var timerTask: Task<Void, Never>?
     private var deadline: ContinuousClock.Instant?
+    private static var retainedCompletionSound: NSSound?
 
-    init(minutes: Int = 25) {
+    init(
+        minutes: Int = 25,
+        completionSound: CompletionEffect? = nil,
+        completionNotification: CompletionEffect? = nil
+    ) {
         configuredSeconds = max(1, minutes * 60)
         remainingSeconds = configuredSeconds
+        completionSoundEffect = completionSound ?? { Self.playCompletionAlert() }
+        completionNotificationEffect = completionNotification ?? { Self.scheduleCompletionNotification() }
     }
 
-    init(seconds: Int) {
+    init(
+        seconds: Int,
+        completionSound: CompletionEffect? = nil,
+        completionNotification: CompletionEffect? = nil
+    ) {
         configuredSeconds = max(1, seconds)
         remainingSeconds = configuredSeconds
+        completionSoundEffect = completionSound ?? { Self.playCompletionAlert() }
+        completionNotificationEffect = completionNotification ?? { Self.scheduleCompletionNotification() }
     }
 
     var formattedRemaining: String {
@@ -110,21 +127,57 @@ final class PomodoroTimer: ObservableObject {
         timerTask = nil
         deadline = nil
         state = .completed
-        NSSound(named: "Glass")?.play()
+        completionSoundEffect()
         if notifyOnCompletion {
-            notifyCompletion()
+            completionNotificationEffect()
         }
     }
 
-    private func notifyCompletion() {
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else { return }
-            let content = UNMutableNotificationContent()
-            content.title = "Joi says: focus block complete!"
-            content.body = "Lovely work. Stretch, hydrate, and choose your next step."
-            content.sound = .default
-            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    private static func playCompletionAlert() {
+        let namedCandidates = ["Glass", "Hero", "Ping"]
+        for name in namedCandidates {
+            guard let sound = NSSound(named: NSSound.Name(name)) else { continue }
+            retainedCompletionSound = sound
+            sound.stop()
+            if sound.play() { return }
         }
+
+        let fileCandidates = namedCandidates.map { "/System/Library/Sounds/\($0).aiff" }
+        for path in fileCandidates where FileManager.default.fileExists(atPath: path) {
+            guard let sound = NSSound(contentsOfFile: path, byReference: true) else { continue }
+            retainedCompletionSound = sound
+            if sound.play() { return }
+        }
+
+        // The system alert sound is the final always-available AppKit fallback.
+        NSSound.beep()
+    }
+
+    private nonisolated static func scheduleCompletionNotification() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional:
+                enqueueCompletionNotification(on: center)
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                    guard granted else { return }
+                    enqueueCompletionNotification(on: center)
+                }
+            case .denied:
+                // The immediate AppKit alert still fires; respect the user's choice
+                // instead of trying to bypass notification permissions.
+                break
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private nonisolated static func enqueueCompletionNotification(on center: UNUserNotificationCenter) {
+        let content = UNMutableNotificationContent()
+        content.title = "Joi says: focus block complete!"
+        content.body = "Lovely work. Stretch, hydrate, and choose your next step."
+        center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 }

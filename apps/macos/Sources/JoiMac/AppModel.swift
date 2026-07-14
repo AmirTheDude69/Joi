@@ -172,7 +172,10 @@ final class AppModel: ObservableObject {
         }
         if case .error = voice.status {
             voice.disconnect()
-        } else if activePanel == .voice {
+            activePanel = .none
+            return
+        }
+        if activePanel == .voice {
             voice.disconnect()
             activePanel = .none
             return
@@ -193,6 +196,12 @@ final class AppModel: ObservableObject {
                 instructions: personaInstructions
             )
         }
+    }
+
+    func dismissVoiceError() {
+        guard case .error = voice.status else { return }
+        voice.disconnect()
+        activePanel = .none
     }
 
     func performMusic(_ action: MusicController.Action) {
