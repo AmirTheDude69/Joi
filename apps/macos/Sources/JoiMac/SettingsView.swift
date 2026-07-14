@@ -127,7 +127,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack {
-                    Text("Version 0.3.0")
+                    Text("Version \(appVersion)")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                     Spacer()
@@ -150,6 +150,10 @@ struct SettingsView: View {
             launchAtLogin = SMAppService.mainApp.status == .enabled
             launchMessage = "Move Joi to Applications before enabling launch at login."
         }
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
     }
 }
 

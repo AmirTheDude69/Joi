@@ -4,13 +4,15 @@ import Foundation
 
 @MainActor
 final class MusicController: ObservableObject {
-    enum Action {
+    enum Action: String, CaseIterable, Identifiable {
         case previous
         case playPause
         case next
         case favorite
         case shuffle
         case lyrics
+
+        var id: String { rawValue }
     }
 
     @Published private(set) var lastMessage: String?
@@ -22,6 +24,10 @@ final class MusicController: ObservableObject {
         }
 
         let target = activePlayer()
+        if action == .favorite, target == .spotify {
+            lastMessage = "Spotify's Mac app cannot favorite via Automation; use its + button."
+            return
+        }
         let script = script(for: action, player: target)
         var error: NSDictionary?
         NSAppleScript(source: script)?.executeAndReturnError(&error)
@@ -51,7 +57,7 @@ final class MusicController: ObservableObject {
         case (.spotify, .next):
             return "tell application \"Spotify\" to next track"
         case (.spotify, .favorite):
-            return "tell application \"Spotify\" to set starred of current track to true"
+            return ""
         case (.spotify, .shuffle):
             return "tell application \"Spotify\" to set shuffling to not shuffling"
         case (_, .lyrics):
@@ -65,10 +71,26 @@ final class MusicController: ObservableObject {
     }
 
     private func activePlayer() -> Player {
-        if !NSRunningApplication.runningApplications(withBundleIdentifier: "com.spotify.client").isEmpty {
+        let spotifyRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.spotify.client").isEmpty
+        let musicRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Music").isEmpty
+        if spotifyRunning, isPlaying(.spotify) {
+            return .spotify
+        }
+        if musicRunning, isPlaying(.music) {
+            return .music
+        }
+        if spotifyRunning {
             return .spotify
         }
         return .music
+    }
+
+    private func isPlaying(_ player: Player) -> Bool {
+        let application = player == .spotify ? "Spotify" : "Music"
+        let script = "tell application \"\(application)\" to return (player state as text)"
+        var error: NSDictionary?
+        let state = NSAppleScript(source: script)?.executeAndReturnError(&error).stringValue
+        return error == nil && state?.lowercased() == "playing"
     }
 
     private func openLyrics() {

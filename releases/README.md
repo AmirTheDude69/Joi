@@ -1,5 +1,13 @@
 # Joi macOS installers
 
+## Joi 0.4.0
+
+- File: `Joi-0.4.0-macOS-Universal.dmg`
+- macOS: 14 or later
+- Architectures: Apple Silicon and Intel
+- SHA-256: `5b5912b2e5fe8bcd5c49cd7ada52af47d2455517e5c76dbbbbee5e904b140357`
+- Highlights: frameless Apple-style radial controls, watchOS music honeycomb, immediate continuous Realtime voice, compact Clock-style Focus timer, and natural full-spritesheet motion.
+
 ## Joi 0.3.0
 
 - File: `Joi-0.3.0-macOS-Universal.dmg`

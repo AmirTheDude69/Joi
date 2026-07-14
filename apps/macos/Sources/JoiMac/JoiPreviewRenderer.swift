@@ -9,16 +9,23 @@ enum JoiPreviewRenderer {
         model.isExpanded = true
         model.activePanel = .none
         try write(
-            FloatingCompanionView(model: model).frame(width: 500, height: 500),
-            size: CGSize(width: 500, height: 500),
+            FloatingCompanionView(model: model).frame(width: 560, height: 520),
+            size: CGSize(width: 560, height: 520),
             to: directory.appendingPathComponent("radial-menu.png")
         )
 
-        model.activePanel = .music
+        model.activePanel = .pomodoro
         try write(
-            FloatingCompanionView(model: model).frame(width: 500, height: 500),
-            size: CGSize(width: 500, height: 500),
-            to: directory.appendingPathComponent("music-controls.png")
+            FloatingCompanionView(model: model).frame(width: 560, height: 520),
+            size: CGSize(width: 560, height: 520),
+            to: directory.appendingPathComponent("focus-timer.png")
+        )
+
+        model.activePanel = .voice
+        try write(
+            FloatingCompanionView(model: model).frame(width: 560, height: 520),
+            size: CGSize(width: 560, height: 520),
+            to: directory.appendingPathComponent("voice-mode.png")
         )
 
         try write(

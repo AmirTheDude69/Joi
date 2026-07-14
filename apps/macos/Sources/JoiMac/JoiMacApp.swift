@@ -110,7 +110,7 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func resizePanel(expanded: Bool) {
         guard let panel = companionPanel else { return }
-        let target = expanded ? NSSize(width: 500, height: 500) : NSSize(width: 170, height: 190)
+        let target = expanded ? NSSize(width: 560, height: 520) : NSSize(width: 170, height: 190)
         let center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
         var frame = NSRect(
             x: center.x - target.width / 2,
@@ -119,7 +119,11 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             height: target.height
         )
         frame = constrained(frame)
-        panel.setFrame(frame, display: true, animate: !model.reducedMotion)
+        panel.setFrame(
+            frame,
+            display: true,
+            animate: !model.reducedMotion && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        )
         panel.orderFrontRegardless()
     }
 

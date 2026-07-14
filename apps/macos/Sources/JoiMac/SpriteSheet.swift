@@ -3,6 +3,8 @@ import Foundation
 
 enum SpriteAnimation: String, CaseIterable {
     case idle
+    case runningRight
+    case runningLeft
     case waving
     case jumping
     case failed
@@ -13,6 +15,8 @@ enum SpriteAnimation: String, CaseIterable {
     var row: Int {
         switch self {
         case .idle: 0
+        case .runningRight: 1
+        case .runningLeft: 2
         case .waving: 3
         case .jumping: 4
         case .failed: 5
@@ -24,7 +28,8 @@ enum SpriteAnimation: String, CaseIterable {
 
     var durations: [TimeInterval] {
         switch self {
-        case .idle: [0.28, 0.11, 0.11, 0.14, 0.14, 0.32]
+        case .idle: [0.28, 0.11, 0.11, 0.14, 0.14, 0.20, 0.32]
+        case .runningRight, .runningLeft: [0.10, 0.10, 0.10, 0.10, 0.10, 0.10, 0.10, 0.18]
         case .waving: [0.14, 0.14, 0.14, 0.28]
         case .jumping: [0.14, 0.14, 0.14, 0.14, 0.28]
         case .failed: [0.14, 0.14, 0.14, 0.14, 0.14, 0.14, 0.14, 0.24]
@@ -32,6 +37,32 @@ enum SpriteAnimation: String, CaseIterable {
         case .working: [0.12, 0.12, 0.12, 0.12, 0.12, 0.22]
         case .review: [0.15, 0.15, 0.15, 0.15, 0.15, 0.28]
         }
+    }
+
+    var cycleDuration: TimeInterval {
+        durations.reduce(0, +)
+    }
+}
+
+/// Rows 9 and 10 contain one clockwise family of 16 planted-body gaze poses.
+struct SpriteLookDirection: Equatable {
+    let index: Int
+
+    init(index: Int) {
+        self.index = ((index % 16) + 16) % 16
+    }
+
+    var row: Int { index < 8 ? 9 : 10 }
+    var column: Int { index % 8 }
+
+    static func toward(pointer: CGPoint, from center: CGPoint) -> SpriteLookDirection? {
+        let dx = pointer.x - center.x
+        let dy = pointer.y - center.y
+        guard hypot(dx, dy) > 24 else { return nil }
+        var angle = atan2(dx, -dy) // zero is up; positive angles move clockwise on screen
+        if angle < 0 { angle += 2 * .pi }
+        let index = Int((angle / (2 * .pi) * 16).rounded()) % 16
+        return SpriteLookDirection(index: index)
     }
 }
 
@@ -71,6 +102,8 @@ final class SpriteSheet {
         let candidates = [
             Bundle.main.url(forResource: "spritesheet", withExtension: "webp"),
             Bundle.main.resourceURL?.appendingPathComponent("spritesheet.webp"),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("spritesheet.webp"),
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
                 .appendingPathComponent("../../spritesheet.webp"),
         ].compactMap { $0 }

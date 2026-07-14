@@ -98,9 +98,9 @@ Build the universal DMG on macOS:
 pnpm build:macos
 ```
 
-Or use the checked-in private-beta installer: [Joi 0.3.0 universal DMG](releases/Joi-0.3.0-macOS-Universal.dmg).
+Or use the checked-in private-beta installer: [Joi 0.4.0 universal DMG](releases/Joi-0.4.0-macOS-Universal.dmg).
 
-Open `dist/Joi-0.3.0-macOS-Universal.dmg`, drag Joi to Applications, then Control-click **Joi** and choose **Open** on first launch. Click the avatar to reveal the six controls. Add your own OpenAI API key in Settings; it is stored in macOS Keychain and is not included in the app or repository.
+Open `dist/Joi-0.4.0-macOS-Universal.dmg`, drag Joi to Applications, then Control-click **Joi** and choose **Open** on first launch. Click the avatar to reveal the frameless circular controls and watch-style music cluster. Voice starts a continuous realtime conversation on the first click; click Voice, Search, or Focus again to close it. Add your own OpenAI API key in Settings; it is stored in macOS Keychain and is not included in the app or repository.
 
 The voice assistant uses [`gpt-realtime-2.1`](https://developers.openai.com/api/docs/models/gpt-realtime-2.1) over the [Realtime API](https://developers.openai.com/api/docs/guides/realtime). See the full [macOS walkthrough](apps/macos/README.md).
 

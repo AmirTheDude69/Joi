@@ -32,17 +32,43 @@ enum JoiSelfTest {
         let event = RealtimeVoiceService.sessionUpdate(voice: "shimmer", instructions: AppModel.defaultPersona)
         let session = event["session"] as? [String: Any]
         let audio = session?["audio"] as? [String: Any]
+        let input = audio?["input"] as? [String: Any]
         let output = audio?["output"] as? [String: Any]
+        let turnDetection = input?["turn_detection"] as? [String: Any]
+        let outputFormat = output?["format"] as? [String: Any]
         check(session?["model"] as? String == "gpt-realtime-2.1", "Realtime model pin", failures: &failures)
         check(output?["voice"] as? String == "shimmer", "default Joi voice", failures: &failures)
         check((session?["instructions"] as? String)?.contains("Always be transparent that you are an AI") == true, "AI disclosure prompt", failures: &failures)
+        check(turnDetection?["type"] as? String == "semantic_vad" && turnDetection?["create_response"] as? Bool == true, "continuous semantic VAD", failures: &failures)
+        check(outputFormat?["type"] as? String == "audio/pcm", "Realtime PCM output", failures: &failures)
+        check(SpriteAnimation.runningRight.row == 1 && SpriteAnimation.runningLeft.row == 2, "directional running rows", failures: &failures)
+        check(SpriteAnimation.allCases.map(\.row) == Array(0 ... 8), "all standard animation rows mapped", failures: &failures)
+        check(SpriteAnimation.allCases.map { $0.durations.count } == [7, 8, 8, 4, 5, 8, 6, 6, 6], "every populated standard frame is animated", failures: &failures)
+        check(SpriteLookDirection.toward(pointer: CGPoint(x: 250, y: 150), from: center)?.index == 0, "gaze points up", failures: &failures)
+        check(SpriteLookDirection.toward(pointer: CGPoint(x: 350, y: 250), from: center)?.index == 4, "gaze points right", failures: &failures)
+        check(timer.remainingProgress == 1, "Pomodoro progress resets", failures: &failures)
 
         let music = MusicController()
         check(music.script(for: .next, player: .music) == "tell application \"Music\" to next track", "Apple Music command", failures: &failures)
         check(music.script(for: .shuffle, player: .spotify) == "tell application \"Spotify\" to set shuffling to not shuffling", "Spotify command", failures: &failures)
+        check(music.script(for: .favorite, player: .spotify).isEmpty, "Spotify read-only favorite is not misrepresented", failures: &failures)
+
+        let suiteName = "JoiSelfTest-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let panelTimer = PomodoroTimer(seconds: 1)
+        let panelModel = AppModel(defaults: defaults, pomodoro: panelTimer)
+        panelModel.togglePanel(.pomodoro)
+        check(panelModel.activePanel == .pomodoro, "Focus panel opens", failures: &failures)
+        panelModel.togglePanel(.pomodoro)
+        check(panelModel.activePanel == .none, "Focus panel closes from the same control", failures: &failures)
+        panelTimer.start()
+        panelTimer.tick(notifyOnCompletion: false)
+        panelModel.pomodoroMinutes = 15
+        check(panelTimer.state == .idle && panelTimer.configuredMinutes == 15, "completed Focus preset reconfigures the next timer", failures: &failures)
+        defaults.removePersistentDomain(forName: suiteName)
 
         if failures.isEmpty {
-            print("Joi macOS self-test: 13 checks passed")
+            print("Joi macOS self-test: 27 checks passed")
         } else {
             failures.forEach { print("FAIL: \($0)") }
             print("Joi macOS self-test: \(failures.count) failure(s)")

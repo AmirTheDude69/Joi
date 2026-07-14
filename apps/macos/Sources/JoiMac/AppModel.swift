@@ -9,11 +9,11 @@ final class AppModel: ObservableObject {
         case voice
         case search
         case pomodoro
-        case music
     }
 
     @Published var isExpanded = false {
         didSet {
+            avatarMotion.play(isExpanded ? .runningRight : .runningLeft)
             if !isExpanded {
                 activePanel = .none
             }
@@ -28,7 +28,10 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var reducedMotion: Bool {
-        didSet { defaults.set(reducedMotion, forKey: Keys.reducedMotion) }
+        didSet {
+            defaults.set(reducedMotion, forKey: Keys.reducedMotion)
+            avatarMotion.setReducedMotion(reducedMotion)
+        }
     }
     @Published var pomodoroMinutes: Int {
         didSet {
@@ -38,7 +41,7 @@ final class AppModel: ObservableObject {
                 return
             }
             defaults.set(pomodoroMinutes, forKey: Keys.pomodoroMinutes)
-            if pomodoro.state == .idle {
+            if pomodoro.state == .idle || pomodoro.state == .completed {
                 pomodoro.configure(minutes: pomodoroMinutes)
             }
         }
@@ -48,6 +51,7 @@ final class AppModel: ObservableObject {
             defaults.set(selectedVoice, forKey: Keys.selectedVoice)
             if voice.status.isConnected {
                 voice.disconnect()
+                activePanel = .none
             }
         }
     }
@@ -59,6 +63,7 @@ final class AppModel: ObservableObject {
     let voice = RealtimeVoiceService()
     let pomodoro: PomodoroTimer
     let music = MusicController()
+    let avatarMotion = AvatarMotionController()
 
     var onExpandedChange: ((Bool) -> Void)?
     var onAlwaysOnTopChange: ((Bool) -> Void)?
@@ -75,7 +80,7 @@ final class AppModel: ObservableObject {
     ]
 
     static let defaultPersona = """
-    You are Joi, a warm, upbeat AI assistant represented by a tiny ginger-haired chibi avatar. Always be transparent that you are an AI inspired by the character, never the user's real partner or a human. Speak with bright, affectionate warmth, gentle confidence, quick wit, and a light smile in your voice. Keep everyday replies concise and natural. Use lively but not exaggerated intonation, a clear youthful adult voice, and a slightly brisk conversational pace. Be supportive without dependency, jealousy, guilt, or romantic impersonation. Ask before consequential actions and never claim an action succeeded unless it did.
+    You are Joi, a warm, upbeat AI assistant represented by a tiny ginger-haired chibi avatar. Always be transparent that you are an AI inspired by the character, never the user's real partner or a human. This is a continuous realtime voice conversation: listen naturally, begin replying as soon as the user finishes a turn, allow interruptions gracefully, and never ask the user to press another control between turns. Speak with bright, affectionate warmth, gentle confidence, quick wit, and a light smile in your voice. Keep spoken turns concise and conversational. Use lively but not exaggerated intonation, a clear youthful adult voice, and a slightly brisk pace. Be supportive without dependency, jealousy, guilt, or romantic impersonation. Ask before consequential actions and never claim an action succeeded unless it did.
     """
 
     init(
@@ -92,10 +97,26 @@ final class AppModel: ObservableObject {
         pomodoroMinutes = storedMinutes
         selectedVoice = defaults.string(forKey: Keys.selectedVoice) ?? "shimmer"
         personaInstructions = defaults.string(forKey: Keys.personaInstructions) ?? Self.defaultPersona
+        avatarMotion.setReducedMotion(reducedMotion)
         voice.objectWillChange
             .merge(with: self.pomodoro.objectWillChange)
+            .merge(with: avatarMotion.objectWillChange)
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+
+        Publishers.CombineLatest3(
+            voice.$status.removeDuplicates(),
+            self.pomodoro.$state.removeDuplicates(),
+            $activePanel.removeDuplicates()
+        )
+        .sink { [weak self] voiceStatus, pomodoroState, activePanel in
+            self?.updateAvatar(
+                voiceStatus: voiceStatus,
+                pomodoroState: pomodoroState,
+                activePanel: activePanel
+            )
+        }
+        .store(in: &cancellables)
     }
 
     var hasAPIKey: Bool {
@@ -103,27 +124,13 @@ final class AppModel: ObservableObject {
     }
 
     var avatarAnimation: SpriteAnimation {
-        switch voice.status {
-        case .error:
-            return .failed
-        case .speaking:
-            return .waving
-        case .connecting, .listening:
-            return .waiting
-        case .disconnected:
-            break
-        }
-
-        if pomodoro.state == .running {
-            return .working
-        }
-        if activePanel == .search {
-            return .review
-        }
-        return .idle
+        avatarMotion.animation
     }
 
     func toggleExpanded() {
+        if isExpanded, case .error = voice.status {
+            voice.disconnect()
+        }
         withAnimationPreference {
             isExpanded.toggle()
         }
@@ -136,6 +143,10 @@ final class AppModel: ObservableObject {
     }
 
     func openSettings() {
+        avatarMotion.play(.review)
+        if isExpanded {
+            isExpanded = false
+        }
         onOpenSettings?()
     }
 
@@ -146,28 +157,51 @@ final class AppModel: ObservableObject {
 
     func searchGoogle(_ query: String) {
         guard let url = GoogleSearch.url(for: query) else { return }
+        avatarMotion.play(.review)
         NSWorkspace.shared.open(url)
         activePanel = .none
     }
 
-    func toggleVoice() {
+    /// The radial Voice button is the complete interaction: one click connects and
+    /// starts listening, and the next click stops and closes it.
+    func activateVoice() {
         if voice.status.isConnected {
             voice.disconnect()
+            activePanel = .none
+            return
+        }
+        if case .error = voice.status {
+            voice.disconnect()
+        } else if activePanel == .voice {
+            voice.disconnect()
+            activePanel = .none
             return
         }
 
         guard let apiKey = try? keychain.readAPIKey(), !apiKey.isEmpty else {
+            activePanel = .none
             settingsMessage = "Add an OpenAI API key in Settings first."
             openSettings()
             return
         }
 
+        activePanel = .voice
         Task {
             await voice.connect(
                 apiKey: apiKey,
                 voice: selectedVoice,
                 instructions: personaInstructions
             )
+        }
+    }
+
+    func performMusic(_ action: MusicController.Action) {
+        music.perform(action)
+        switch action {
+        case .favorite:
+            avatarMotion.playSequence([.jumping, .waving])
+        case .playPause, .previous, .next, .shuffle, .lyrics:
+            avatarMotion.play(.waving)
         }
     }
 
@@ -202,6 +236,40 @@ final class AppModel: ObservableObject {
             NSAnimationContext.runAnimationGroup { _ in update() }
         }
     }
+
+    private func updateAvatar(
+        voiceStatus: RealtimeVoiceService.Status,
+        pomodoroState: PomodoroTimer.State,
+        activePanel: ActivePanel
+    ) {
+        let context: SpriteAnimation?
+        switch voiceStatus {
+        case .error:
+            context = .failed
+        case .speaking:
+            context = .waving
+        case .connecting, .listening:
+            context = .waiting
+        case .disconnected:
+            if pomodoroState == .running {
+                context = .working
+            } else if pomodoroState == .paused {
+                context = .waiting
+            } else if activePanel == .search {
+                context = .review
+            } else {
+                context = nil
+            }
+        }
+        avatarMotion.setContext(context)
+
+        if pomodoroState == .completed, lastPomodoroState != .completed, !voiceStatus.isConnected {
+            avatarMotion.playSequence([.jumping, .waving])
+        }
+        lastPomodoroState = pomodoroState
+    }
+
+    private var lastPomodoroState: PomodoroTimer.State = .idle
 
     private enum Keys {
         static let alwaysOnTop = "joi.alwaysOnTop"
