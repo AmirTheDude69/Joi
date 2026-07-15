@@ -15,7 +15,7 @@ Joi always identifies as AI. It is inspired by a supplied character, not an impe
 - A stateless Streamable HTTP MCP server with `joi.*` tool namespaces.
 - An installable Codex plugin with ten `$joi-*` skills and the animated pet package.
 - A Next.js PWA with chat, tasks, memory, approvals, routines, settings, and avatar state synchronization.
-- A separate native macOS floating companion with an AssistiveTouch-style radial menu, Realtime voice, Pomodoro, Google search, Codex launching, and Apple Music/Spotify controls.
+- A separate native macOS floating companion with an AssistiveTouch-style radial menu, a ChatGPT Voice browser handoff, resizable avatar, Pomodoro, Google search, Codex launching, current-source media controls, and a native right-click **Close Joi** command.
 - PostgreSQL/pgvector schema with row-level tenant isolation and a queue-ready automation table.
 - A 131-ID feature registry that separates the planned MVP from the implemented beta subset; unavailable features remain visibly gated.
 
@@ -98,11 +98,11 @@ Build the universal DMG on macOS:
 pnpm build:macos
 ```
 
-Or use the checked-in private-beta installer: [Joi 0.4.1 universal DMG](releases/Joi-0.4.1-macOS-Universal.dmg).
+Or use the checked-in private-beta installer: [Joi 0.5.0 universal DMG](releases/Joi-0.5.0-macOS-Universal.dmg).
 
-Open `dist/Joi-0.4.1-macOS-Universal.dmg`, drag Joi to Applications, then Control-click **Joi** and choose **Open** on first launch. Click the avatar to reveal the frameless circular controls and watch-style music cluster. Voice starts a continuous realtime conversation on the first click; click Voice, Search, Focus, or the voice error card again to close it. The transport buttons control the current macOS Now Playing source, including Spotify in Arc. Add your own OpenAI API key in Settings; it is stored in macOS Keychain and is not included in the app or repository.
+Open `releases/Joi-0.5.0-macOS-Universal.dmg`, drag Joi to Applications, then Control-click **Joi** and choose **Open** on first launch. Click the avatar to reveal the frameless circular controls and icon-only watch-style music cluster. The supplied magnetic-hover behavior now applies to native buttons, inactive controls auto-close after a configurable delay, Focus includes a persistent ten-item checklist, and Settings includes a 70–140% avatar-size slider. Voice opens the official ChatGPT website; select ChatGPT's Voice icon once and allow browser microphone access, then return to your apps. That browser click is required by ChatGPT and cannot be bypassed by Joi. No OpenAI API key is stored in the app. Transport follows the current macOS Now Playing source, while capability-gated Shuffle/Favorite include a local Spotify Web route for the current Arc session.
 
-The voice assistant uses [`gpt-realtime-2.1`](https://developers.openai.com/api/docs/models/gpt-realtime-2.1) over the [Realtime API](https://developers.openai.com/api/docs/guides/realtime). See the full [macOS walkthrough](apps/macos/README.md).
+See the full [macOS walkthrough](apps/macos/README.md) and OpenAI's [ChatGPT Voice guide](https://help.openai.com/en/articles/20001274/).
 
 ## Repository layout
 

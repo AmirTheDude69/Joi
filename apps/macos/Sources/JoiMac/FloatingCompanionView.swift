@@ -7,8 +7,13 @@ struct FloatingCompanionView: View {
     @State private var searchText = ""
     @State private var gazeDirection: SpriteLookDirection?
 
-    private let expandedSize = CGSize(width: 560, height: 520)
-    private let radialRadius: CGFloat = 190
+    private var panelSize: CGSize {
+        CompanionLayout.panelSize(expanded: model.isExpanded, scale: model.avatarScale)
+    }
+
+    private var expandedClearance: CGFloat {
+        CompanionLayout.expandedClearance(scale: model.avatarScale)
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -28,6 +33,7 @@ struct FloatingCompanionView: View {
             .onContinuousHover { phase in
                 switch phase {
                 case let .active(location):
+                    model.noteMenuInteraction()
                     gazeDirection = model.avatarMotion.allowsGazeTracking
                         ? SpriteLookDirection.toward(pointer: location, from: center)
                         : nil
@@ -37,8 +43,8 @@ struct FloatingCompanionView: View {
             }
         }
         .frame(
-            width: model.isExpanded ? expandedSize.width : 170,
-            height: model.isExpanded ? expandedSize.height : 190
+            width: panelSize.width,
+            height: panelSize.height
         )
         .animation(effectiveReducedMotion ? nil : .spring(response: 0.34, dampingFraction: 0.78), value: model.isExpanded)
         .animation(effectiveReducedMotion ? nil : .easeInOut(duration: 0.18), value: model.activePanel)
@@ -49,15 +55,24 @@ struct FloatingCompanionView: View {
     }
 
     private var avatar: some View {
-        VStack(spacing: -5) {
+        let avatarSize = CompanionLayout.avatarSize(scale: model.avatarScale)
+        let scale = CGFloat(model.avatarScale)
+        return VStack(spacing: -5 * scale) {
             AnimatedSpriteView(
                 animation: model.avatarAnimation,
                 lookDirection: model.avatarMotion.allowsGazeTracking ? gazeDirection : nil,
                 playsAnimation: model.avatarMotion.isAnimating,
                 reducedMotion: model.reducedMotion
             )
-            .frame(width: 138, height: 150)
+            .frame(width: avatarSize.width, height: avatarSize.height)
             .contentShape(Rectangle())
+            .contextMenu {
+                Button(role: .destructive) {
+                    model.quitJoi()
+                } label: {
+                    Label("Close Joi", systemImage: "xmark.circle")
+                }
+            }
             .onTapGesture { model.toggleExpanded() }
             .gesture(
                 DragGesture(minimumDistance: 6, coordinateSpace: .global)
@@ -65,29 +80,20 @@ struct FloatingCompanionView: View {
                     // the screen-space mouse origin, then follows NSEvent.mouseLocation.
                     // Keeping the SwiftUI gesture as a signal avoids feedback from the
                     // window moving underneath this view.
-                    .onChanged { model.onWindowDrag?($0.translation) }
+                    .onChanged {
+                        model.noteMenuInteraction()
+                        model.onWindowDrag?($0.translation)
+                    }
                     .onEnded { _ in model.onWindowDragEnded?() }
             )
             .accessibilityLabel(model.isExpanded ? "Close Joi controls" : "Open Joi controls")
             .accessibilityAddTraits(.isButton)
-            .shadow(color: Color.black.opacity(0.24), radius: 10, y: 6)
-            .overlay(alignment: .top) {
-                if !model.isExpanded, model.voice.status.isConnected {
-                    Label(
-                        model.voice.status == .speaking ? "Speaking" : "Listening",
-                        systemImage: model.voice.status == .speaking ? "waveform" : "mic.fill"
-                    )
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundStyle(.orange)
-                    .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
-                    .offset(y: -4)
-                }
-            }
+            .shadow(color: Color.black.opacity(0.24), radius: 10 * scale, y: 6 * scale)
 
             Capsule()
                 .fill(.black.opacity(0.12))
-                .frame(width: 68, height: 12)
-                .blur(radius: 4)
+                .frame(width: 68 * scale, height: 12 * scale)
+                .blur(radius: 4 * scale)
         }
     }
 
@@ -99,6 +105,7 @@ struct FloatingCompanionView: View {
                     if action == .music {
                         MusicHoneycombCluster(
                             controller: model.music,
+                            reducedMotion: effectiveReducedMotion,
                             onAction: model.performMusic
                         )
                     } else {
@@ -107,11 +114,12 @@ struct FloatingCompanionView: View {
                             icon: icon(for: action),
                             label: label(for: action),
                             isActive: isActive(action),
+                            reducedMotion: effectiveReducedMotion,
                             handler: { handle(action) }
                         )
                     }
                 }
-                .position(RadialLayout.point(for: action, center: center, radius: radialRadius))
+                .position(position(for: action, center: center))
                 .transition(.scale(scale: 0.88).combined(with: .opacity))
             }
         }
@@ -121,23 +129,37 @@ struct FloatingCompanionView: View {
     private func activePanel(center: CGPoint) -> some View {
         switch model.activePanel {
         case .voice:
-            VoiceStatusPanel(model: model)
-                .position(x: center.x, y: center.y - 127)
+            ChatGPTVoicePanel(model: model)
+                .position(x: center.x, y: center.y - 127 - expandedClearance)
         case .search:
-            QuickSearchPanel(text: $searchText) { query in
-                model.searchGoogle(query)
-                searchText = ""
-            }
-            .position(x: center.x + 105, y: center.y - 155)
+            QuickSearchPanel(
+                text: $searchText,
+                reducedMotion: effectiveReducedMotion,
+                onInteraction: model.noteMenuInteraction
+            ) { query in
+                    model.searchGoogle(query)
+                    searchText = ""
+                }
+            .position(
+                x: center.x + 105 + expandedClearance * 0.5,
+                y: center.y - 155 - expandedClearance
+            )
         case .pomodoro:
             PomodoroPanel(model: model)
-                .position(x: center.x + 165, y: center.y - 45)
+                .position(
+                    x: position(for: .pomodoro, center: center).x,
+                    y: CompanionLayout.focusPanelCenterY(
+                        center: center,
+                        scale: model.avatarScale
+                    )
+                )
         case .none:
             EmptyView()
         }
     }
 
     private func handle(_ action: RadialAction) {
+        model.noteMenuInteraction()
         switch action {
         case .voice:
             model.activateVoice()
@@ -154,10 +176,24 @@ struct FloatingCompanionView: View {
         }
     }
 
+    private func position(for action: RadialAction, center: CGPoint) -> CGPoint {
+        // The browser-handoff card occupies the narrow space between Joi and the
+        // 12-o'clock control. Pin the selected Voice control to the top edge so
+        // it stays fully clickable without covering the card title.
+        if action == .voice, model.activePanel == .voice {
+            return CGPoint(x: center.x, y: 35)
+        }
+        return RadialLayout.point(
+            for: action,
+            center: center,
+            radius: CompanionLayout.radialRadius(scale: model.avatarScale)
+        )
+    }
+
     private func isActive(_ action: RadialAction) -> Bool {
         switch action {
         case .voice:
-            model.activePanel == .voice || model.voice.status.isConnected
+            model.activePanel == .voice
         case .search:
             model.activePanel == .search
         case .pomodoro:
@@ -182,13 +218,7 @@ struct FloatingCompanionView: View {
 
     private func icon(for action: RadialAction) -> String {
         switch action {
-        case .voice:
-            switch model.voice.status {
-            case .speaking: "waveform"
-            case .connecting: "ellipsis"
-            case .listening: "mic.fill"
-            case .disconnected, .error: "waveform.badge.mic"
-            }
+        case .voice: "waveform.badge.mic"
         case .search: "magnifyingglass"
         case .pomodoro: "timer"
         case .settings: "gearshape.fill"
@@ -199,14 +229,7 @@ struct FloatingCompanionView: View {
 
     private func label(for action: RadialAction) -> String {
         switch action {
-        case .voice:
-            switch model.voice.status {
-            case .connecting: "Connecting"
-            case .listening: "Listening"
-            case .speaking: "Speaking"
-            case .error: "Voice error"
-            case .disconnected: "Voice"
-            }
+        case .voice: "Voice"
         case .search: "Search"
         case .pomodoro: "Focus"
         case .settings: "Settings"
@@ -268,6 +291,7 @@ private struct FramelessActionButton: View {
     let icon: String
     let label: String
     let isActive: Bool
+    let reducedMotion: Bool
     let handler: () -> Void
 
     var body: some View {
@@ -296,13 +320,14 @@ private struct FramelessActionButton: View {
         .buttonStyle(.plain)
         .frame(width: 86, height: 68)
         .contentShape(.interaction, Rectangle())
+        .magneticHover(enabled: !reducedMotion)
         .help(help)
         .accessibilityLabel(help)
     }
 
     private var help: String {
         switch action {
-        case .voice: "Start or stop the OpenAI realtime voice assistant"
+        case .voice: "Open ChatGPT Voice in your default browser"
         case .search: "Open or close quick Google search"
         case .pomodoro: "Open or close the focus timer"
         case .settings: "Joi settings"
@@ -314,6 +339,8 @@ private struct FramelessActionButton: View {
 
 private struct QuickSearchPanel: View {
     @Binding var text: String
+    let reducedMotion: Bool
+    let onInteraction: () -> Void
     let onSubmit: (String) -> Void
     @FocusState private var focused: Bool
 
@@ -331,6 +358,7 @@ private struct QuickSearchPanel: View {
             }
             .buttonStyle(.plain)
             .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .magneticHover(enabled: !reducedMotion)
         }
         .padding(.horizontal, 13)
         .frame(width: 244, height: 46)
@@ -338,80 +366,71 @@ private struct QuickSearchPanel: View {
         .overlay(Capsule().stroke(.white.opacity(0.45), lineWidth: 0.7))
         .shadow(color: .black.opacity(0.25), radius: 12, y: 5)
         .onAppear { focused = true }
+        .onChange(of: text) { _, _ in onInteraction() }
     }
 }
 
-private struct VoiceStatusPanel: View {
+private struct ChatGPTVoicePanel: View {
     @ObservedObject var model: AppModel
-    @Environment(\.accessibilityReduceMotion) private var systemReducedMotion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 9) {
-                Image(systemName: model.voice.status == .speaking ? "waveform" : "mic.fill")
-                    .symbolEffect(
-                        .variableColor.iterative,
-                        isActive: model.voice.status.isConnected && !model.reducedMotion && !systemReducedMotion
-                    )
+                Image(systemName: "waveform.badge.mic")
                     .foregroundStyle(.orange)
-                Text(model.voice.status.label)
+                Text("ChatGPT Voice")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                 Spacer()
-                Text(model.selectedVoice.capitalized)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Button { model.dismissVoiceHandoff() } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .magneticHover(enabled: !model.reducedMotion)
+                .help("Close these instructions")
             }
 
-            if case let .error(message) = model.voice.status {
-                HStack(alignment: .top, spacing: 8) {
-                    Text(message)
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                        .lineLimit(2)
-                    Spacer(minLength: 0)
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                }
-            } else if let warning = model.voice.lastWarning {
-                Text(warning)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                    .lineLimit(2)
-            } else if !model.voice.assistantTranscript.isEmpty {
-                Text(model.voice.assistantTranscript)
-                    .font(.caption)
-                    .lineLimit(2)
-            } else {
-                Text(model.voice.status == .disconnected
-                     ? "Starting live conversation…"
-                     : "Live conversation is on · click Voice again to end")
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(model.voiceHandoff == .failed ? Color.red : Color.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Button("Open ChatGPT") { model.openChatGPTVoiceAgain() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.orange)
+                    .magneticHover(enabled: !model.reducedMotion)
+                Text("Recommended voice: Maple")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(12)
-        .frame(width: 270)
-        .frame(minHeight: 68)
+        .frame(width: 286)
+        .frame(minHeight: 102)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.45), lineWidth: 0.7))
         .shadow(color: .black.opacity(0.22), radius: 12, y: 5)
-        .contentShape(Rectangle())
-        .onTapGesture { model.dismissVoiceError() }
-        .accessibilityAction(named: "Dismiss voice error") {
-            model.dismissVoiceError()
+    }
+
+    private var message: String {
+        switch model.voiceHandoff {
+        case .ready, .opened:
+            "ChatGPT opened. Select its Voice icon once and allow microphone access, then return to your apps. Joi cannot control or end that browser session."
+        case .failed:
+            "ChatGPT could not be opened. Use Open ChatGPT to try again."
         }
     }
 }
 
 private struct PomodoroPanel: View {
     @ObservedObject var model: AppModel
+    @State private var newTaskTitle = ""
+    @FocusState private var taskFieldFocused: Bool
 
     private let presets = [15, 25, 30, 45]
 
     var body: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 6) {
             HStack {
                 Label("Focus", systemImage: "timer")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -438,23 +457,86 @@ private struct PomodoroPanel: View {
 
             HStack(spacing: 5) {
                 ForEach(presets, id: \.self) { minutes in
-                    Button("\(minutes)") { model.pomodoroMinutes = minutes }
+                    Button("\(minutes)") {
+                        model.noteMenuInteraction()
+                        model.pomodoroMinutes = minutes
+                    }
                         .font(.system(size: 10, weight: .medium, design: .rounded))
                         .buttonStyle(FocusPresetButtonStyle(selected: model.pomodoroMinutes == minutes))
                         .disabled(model.pomodoro.state == .running || model.pomodoro.state == .paused)
+                        .magneticHover(enabled: !model.reducedMotion)
                 }
             }
 
             HStack(spacing: 8) {
-                Button("Reset", action: model.pomodoro.reset)
+                Button("Reset") {
+                    model.noteMenuInteraction()
+                    model.pomodoro.reset()
+                }
                     .buttonStyle(FocusControlButtonStyle(color: .white.opacity(0.12)))
                     .disabled(model.pomodoro.state == .idle)
+                    .magneticHover(enabled: !model.reducedMotion)
                 Button(model.pomodoro.state == .running ? "Pause" : "Start", action: toggleTimer)
                     .buttonStyle(FocusControlButtonStyle(color: model.pomodoro.state == .running ? .orange : .green))
+                    .magneticHover(enabled: !model.reducedMotion)
             }
+
+            Divider()
+                .overlay(.white.opacity(0.16))
+
+            HStack(spacing: 6) {
+                TextField(
+                    model.focusTasks.count >= model.focusTaskLimit ? "10 tasks max" : "Add task",
+                    text: $newTaskTitle
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .focused($taskFieldFocused)
+                .onSubmit(addTask)
+                .onChange(of: newTaskTitle) { _, _ in model.noteMenuInteraction() }
+                .disabled(model.focusTasks.count >= model.focusTaskLimit)
+
+                Button(action: addTask) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(
+                    newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || model.focusTasks.count >= model.focusTaskLimit
+                )
+                .magneticHover(enabled: !model.reducedMotion)
+                .help("Add focus task")
+                .accessibilityLabel("Add focus task")
+            }
+            .padding(.leading, 9)
+            .padding(.trailing, 4)
+            .frame(height: 28)
+            .background(.white.opacity(0.08), in: Capsule())
+
+            ScrollView(.vertical) {
+                LazyVStack(spacing: 3) {
+                    ForEach(model.focusTasks) { task in
+                        FocusTaskRow(
+                            task: task,
+                            reducedMotion: model.reducedMotion,
+                            onToggle: { model.toggleFocusTask(id: task.id) },
+                            onDelete: { model.removeFocusTask(id: task.id) }
+                        )
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+            .frame(height: 69)
         }
         .padding(11)
-        .frame(width: 202, height: 204)
+        .frame(
+            width: CompanionLayout.focusPanelSize.width,
+            height: CompanionLayout.focusPanelSize.height
+        )
         .foregroundStyle(.white)
         .background(Color.black.opacity(0.84), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.18), lineWidth: 0.8))
@@ -471,11 +553,67 @@ private struct PomodoroPanel: View {
     }
 
     private func toggleTimer() {
+        model.noteMenuInteraction()
         if model.pomodoro.state == .running {
             model.pomodoro.pause()
         } else {
             model.pomodoro.start()
         }
+    }
+
+    private func addTask() {
+        if model.addFocusTask(newTaskTitle) {
+            newTaskTitle = ""
+            taskFieldFocused = true
+        }
+    }
+}
+
+private struct FocusTaskRow: View {
+    let task: FocusTaskItem
+    let reducedMotion: Bool
+    let onToggle: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Button(action: onToggle) {
+                Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(task.isCompleted ? Color.green : Color.white.opacity(0.7))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .magneticHover(enabled: !reducedMotion)
+            .help(task.isCompleted ? "Mark task incomplete" : "Mark task complete")
+            .accessibilityLabel(
+                task.isCompleted
+                    ? "Mark \(task.title) incomplete"
+                    : "Mark \(task.title) complete"
+            )
+
+            Text(task.title)
+                .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                .foregroundStyle(task.isCompleted ? Color.white.opacity(0.46) : Color.white.opacity(0.88))
+                .strikethrough(task.isCompleted)
+                .lineLimit(1)
+
+            Spacer(minLength: 2)
+
+            Button(action: onDelete) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.52))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .magneticHover(enabled: !reducedMotion)
+            .help("Delete \(task.title)")
+            .accessibilityLabel("Delete \(task.title)")
+        }
+        .frame(height: 22)
     }
 }
 
@@ -504,6 +642,7 @@ private struct FocusControlButtonStyle: ButtonStyle {
 
 private struct MusicHoneycombCluster: View {
     @ObservedObject var controller: MusicController
+    let reducedMotion: Bool
     let onAction: (MusicController.Action) -> Void
 
     private let bubbles: [MusicBubble] = [
@@ -516,30 +655,57 @@ private struct MusicHoneycombCluster: View {
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .topLeading) {
-                ForEach(bubbles) { bubble in
-                    Button { onAction(bubble.action) } label: {
-                        Image(systemName: bubble.icon)
-                            .font(.system(size: max(9, bubble.size * 0.36), weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: bubble.size, height: bubble.size)
-                    }
-                    .buttonStyle(GlassMusicButtonStyle(accent: bubble.color))
-                    .contentShape(Circle())
-                    .position(x: bubble.x, y: bubble.y)
-                    .help(bubble.help)
-                    .accessibilityLabel(bubble.help)
+        ZStack(alignment: .topLeading) {
+            ForEach(bubbles) { bubble in
+                Button { onAction(bubble.action) } label: {
+                    Image(systemName: bubble.icon)
+                        .font(.system(size: max(9, bubble.size * 0.36), weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: bubble.size, height: bubble.size)
                 }
+                .buttonStyle(GlassMusicButtonStyle(accent: bubble.color))
+                .contentShape(Circle())
+                .position(x: bubble.x, y: bubble.y)
+                .magneticHover(enabled: !reducedMotion)
+                .help(bubble.help)
+                .accessibilityLabel(bubble.help)
             }
-            .frame(width: 108, height: 88)
-            Text(controller.lastMessage ?? "Music")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .shadow(color: .black.opacity(0.9), radius: 3, y: 1)
+
+            if controller.permissionRequired {
+                Button {
+                    controller.requestAccessibilityPermission()
+                } label: {
+                    Image(systemName: "lock.shield.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.orange)
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(GlassMusicButtonStyle(accent: .orange))
+                .position(x: 106, y: 10)
+                .magneticHover(enabled: !reducedMotion)
+                .help("Allow Joi to send fallback media keys")
+                .accessibilityLabel("Allow Joi to send fallback media keys")
+            } else if controller.showsFallbackOption {
+                Button {
+                    controller.tryFallbackForLastAction()
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(GlassMusicButtonStyle(accent: .orange))
+                .position(x: 106, y: 86)
+                .magneticHover(enabled: !reducedMotion)
+                .help("Retry with the macOS media key")
+                .accessibilityLabel("Retry with the macOS media key")
+            }
         }
-        .frame(width: 116, height: 105)
+        .frame(width: 118, height: 96)
+        .onAppear { controller.refreshAccessibilityPermission() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            controller.refreshAccessibilityPermission()
+        }
     }
 }
 

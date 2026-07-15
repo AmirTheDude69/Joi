@@ -33,8 +33,12 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, U
         if let previewIndex = CommandLine.arguments.firstIndex(of: "--render-previews"),
            CommandLine.arguments.indices.contains(previewIndex + 1) {
             let directory = URL(fileURLWithPath: CommandLine.arguments[previewIndex + 1], isDirectory: true)
+            let previewSuiteName = "JoiPreview-\(UUID().uuidString)"
+            let previewDefaults = UserDefaults(suiteName: previewSuiteName)!
+            let previewModel = AppModel(defaults: previewDefaults)
+            defer { previewDefaults.removePersistentDomain(forName: previewSuiteName) }
             do {
-                try JoiPreviewRenderer.render(to: directory, model: model)
+                try JoiPreviewRenderer.render(to: directory, model: previewModel)
                 print("Rendered Joi previews to \(directory.path)")
                 fflush(stdout)
                 exit(0)
@@ -55,7 +59,7 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, U
     }
 
     private func createCompanionPanel() {
-        let size = NSSize(width: 170, height: 190)
+        let size = CompanionLayout.panelSize(expanded: false, scale: model.avatarScale)
         let panel = CompanionPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .fullSizeContentView],
@@ -95,13 +99,19 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, U
 
     private func wireModel() {
         model.onExpandedChange = { [weak self] expanded in
-            self?.resizePanel(expanded: expanded)
+            self?.resizePanel(expanded: expanded, animate: true)
+        }
+        model.onAvatarScaleChange = { [weak self] _ in
+            self?.resizePanel(expanded: self?.model.isExpanded ?? false, animate: false)
         }
         model.onAlwaysOnTopChange = { [weak self] alwaysOnTop in
             self?.companionPanel?.level = alwaysOnTop ? .floating : .normal
         }
         model.onOpenSettings = { [weak self] in
             self?.showSettings()
+        }
+        model.onQuit = { [weak self] in
+            self?.quit()
         }
         model.onWindowDrag = { [weak self] translation in
             self?.dragPanel(translation: translation)
@@ -111,9 +121,10 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, U
         }
     }
 
-    private func resizePanel(expanded: Bool) {
+    private func resizePanel(expanded: Bool, animate: Bool) {
         guard let panel = companionPanel else { return }
-        let target = expanded ? NSSize(width: 560, height: 520) : NSSize(width: 170, height: 190)
+        finishPanelDrag()
+        let target = CompanionLayout.panelSize(expanded: expanded, scale: model.avatarScale)
         let center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
         var frame = NSRect(
             x: center.x - target.width / 2,
@@ -125,7 +136,9 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, U
         panel.setFrame(
             frame,
             display: true,
-            animate: !model.reducedMotion && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            animate: animate
+                && !model.reducedMotion
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         )
         panel.orderFrontRegardless()
     }
@@ -200,6 +213,10 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, U
 
     @objc private func quit() {
         NSApplication.shared.terminate(nil)
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        model.music.refreshAccessibilityPermission()
     }
 
     nonisolated func userNotificationCenter(

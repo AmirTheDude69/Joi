@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -37,21 +38,143 @@ enum JoiSelfTest {
         timer.reset()
         check(timer.state == .idle && timer.formattedRemaining == "00:02", "Pomodoro reset", failures: &failures)
 
-        let event = RealtimeVoiceService.sessionUpdate(voice: "shimmer", instructions: AppModel.defaultPersona)
-        let session = event["session"] as? [String: Any]
-        let audio = session?["audio"] as? [String: Any]
-        let input = audio?["input"] as? [String: Any]
-        let output = audio?["output"] as? [String: Any]
-        let turnDetection = input?["turn_detection"] as? [String: Any]
-        let outputFormat = output?["format"] as? [String: Any]
-        check(session?["model"] as? String == "gpt-realtime-2.1", "Realtime model pin", failures: &failures)
-        check(output?["voice"] as? String == "shimmer", "default Joi voice", failures: &failures)
-        check((session?["instructions"] as? String)?.contains("Always be transparent that you are an AI") == true, "AI disclosure prompt", failures: &failures)
-        check(turnDetection?["type"] as? String == "semantic_vad" && turnDetection?["create_response"] as? Bool == true, "continuous semantic VAD", failures: &failures)
         check(
-            outputFormat?["type"] as? String == "audio/pcm"
-                && outputFormat?["rate"] as? Int == 24_000,
-            "Realtime PCM output includes required 24 kHz rate",
+            ChatGPTVoiceLauncher.url.scheme == "https"
+                && ChatGPTVoiceLauncher.url.host == "chatgpt.com"
+                && ChatGPTVoiceLauncher.url.path == "/",
+            "Voice handoff uses only the official ChatGPT URL",
+            failures: &failures
+        )
+        check(
+            CompanionLayout.normalizedScale(.nan) == CompanionLayout.defaultAvatarScale,
+            "non-finite avatar scale uses the default",
+            failures: &failures
+        )
+        check(
+            CompanionLayout.normalizedScale(0.2) == 0.70
+                && CompanionLayout.normalizedScale(2.0) == 1.40,
+            "avatar scale is clamped to 70–140 percent",
+            failures: &failures
+        )
+        let smallCollapsed = CompanionLayout.collapsedSize(scale: 0.70)
+        let largeCollapsed = CompanionLayout.collapsedSize(scale: 1.40)
+        check(
+            abs(smallCollapsed.width - 119) < 0.001
+                && abs(smallCollapsed.height - 133) < 0.001
+                && abs(largeCollapsed.width - 238) < 0.001
+                && abs(largeCollapsed.height - 266) < 0.001,
+            "collapsed panel follows avatar scale",
+            failures: &failures
+        )
+        check(
+            CompanionLayout.expandedSize(scale: 0.70) == CompanionLayout.baseExpandedSize
+                && CompanionLayout.expandedSize(scale: 1.40).width > CompanionLayout.baseExpandedSize.width
+                && CompanionLayout.radialRadius(scale: 1.40) > CompanionLayout.baseRadialRadius,
+            "expanded menu gains clearance for a large avatar",
+            failures: &failures
+        )
+        check(
+            MenuInactivityPolicy.defaultSeconds == 15
+                && MenuInactivityPolicy.normalizedSeconds(1) == 5
+                && MenuInactivityPolicy.normalizedSeconds(99) == 60,
+            "control menu inactivity timeout defaults and clamps",
+            failures: &failures
+        )
+        let activity = Date(timeIntervalSinceReferenceDate: 100)
+        check(
+            !MenuInactivityPolicy.shouldClose(
+                lastInteraction: activity,
+                now: activity.addingTimeInterval(14.99),
+                timeoutSeconds: 15
+            )
+                && MenuInactivityPolicy.shouldClose(
+                    lastInteraction: activity,
+                    now: activity.addingTimeInterval(15),
+                    timeoutSeconds: 15
+                ),
+            "control menu closes only at the inactivity deadline",
+            failures: &failures
+        )
+        for scale in [0.70, 1.0, 1.40] {
+            let size = CompanionLayout.expandedSize(scale: scale)
+            let expandedCenter = CGPoint(x: size.width / 2, y: size.height / 2)
+            let focusPoint = RadialLayout.point(
+                for: .pomodoro,
+                center: expandedCenter,
+                radius: CompanionLayout.radialRadius(scale: scale)
+            )
+            let panelCenter = CGPoint(
+                x: focusPoint.x,
+                y: CompanionLayout.focusPanelCenterY(center: expandedCenter, scale: scale)
+            )
+            let panelRect = CGRect(
+                x: panelCenter.x - CompanionLayout.focusPanelSize.width / 2,
+                y: panelCenter.y - CompanionLayout.focusPanelSize.height / 2,
+                width: CompanionLayout.focusPanelSize.width,
+                height: CompanionLayout.focusPanelSize.height
+            )
+            let buttonRect = CGRect(x: focusPoint.x - 43, y: focusPoint.y - 34, width: 86, height: 68)
+            check(
+                CGRect(origin: .zero, size: size).contains(panelRect)
+                    && !panelRect.intersects(buttonRect),
+                "Focus checklist panel fits without covering its button at \(scale)",
+                failures: &failures
+            )
+        }
+
+        let magnetic = MagneticHoverConfiguration.framerUniversityDefault
+        check(
+            magnetic.distance == 10
+                && magnetic.hoverArea == 10
+                && magnetic.smoothing == 50
+                && magnetic.damping == 100
+                && abs(magnetic.stiffness - 1_025) < 0.001,
+            "magnetic hover uses the supplied Framer defaults",
+            failures: &failures
+        )
+        check(
+            MagneticHoverMath.mapRange(
+                0,
+                fromLow: 0,
+                fromHigh: 100,
+                toLow: 2_000,
+                toHigh: 50
+            ) == 2_000
+                && MagneticHoverMath.mapRange(
+                    100,
+                    fromLow: 0,
+                    fromHigh: 100,
+                    toLow: 2_000,
+                    toHigh: 50
+                ) == 50,
+            "magnetic smoothing maps to Framer spring stiffness",
+            failures: &failures
+        )
+        let magneticSize = CGSize(width: 86, height: 68)
+        check(
+            MagneticHoverMath.offset(
+                pointer: CGPoint(x: 43, y: 34),
+                size: magneticSize
+            ) == .zero
+                && MagneticHoverMath.offset(
+                    pointer: CGPoint(x: 86, y: 34),
+                    size: magneticSize
+                ).width == 10,
+            "magnetic hover center and edge displacement",
+            failures: &failures
+        )
+        let expandedMagnetic = MagneticHoverMath.offset(
+            pointer: CGPoint(x: 96, y: 78),
+            size: magneticSize
+        )
+        check(
+            abs(expandedMagnetic.width - 12.325_581) < 0.001
+                && abs(expandedMagnetic.height - 12.941_176) < 0.001
+                && MagneticHoverMath.offset(
+                    pointer: CGPoint(x: 96.01, y: 34),
+                    size: magneticSize
+                ) == .zero,
+            "magnetic hover preserves the supplied expanded hover boundary",
             failures: &failures
         )
         check(SpriteAnimation.runningRight.row == 1 && SpriteAnimation.runningLeft.row == 2, "directional running rows", failures: &failures)
@@ -79,6 +202,29 @@ enum JoiSelfTest {
             failures: &failures
         )
         check(
+            MusicController.nowPlayingCommand(for: .previous) == .previous
+                && MusicController.nowPlayingCommand(for: .playPause) == .togglePlayPause
+                && MusicController.nowPlayingCommand(for: .next) == .next,
+            "transport controls target the current Now Playing session first",
+            failures: &failures
+        )
+        check(
+            MusicController.nowPlayingFeatureCommands(for: .shuffle) == [.advanceShuffleMode]
+                && MusicController.nowPlayingFeatureCommands(for: .favorite)
+                    == [.addNowPlayingItemToLibrary, .likeTrack]
+                && MusicController.NowPlayingCommand.advanceShuffleMode.rawValue == 6
+                && MusicController.NowPlayingCommand.likeTrack.rawValue == 21
+                && MusicController.NowPlayingCommand.addNowPlayingItemToLibrary.rawValue == 127,
+            "shuffle and favorite use capability-gated Now Playing commands",
+            failures: &failures
+        )
+        _ = MusicController.commandSupport(for: .togglePlayPause)
+        check(
+            MusicController.accessibilitySettingsURL.scheme == "x-apple.systempreferences",
+            "music fallback has an actionable Accessibility settings link",
+            failures: &failures
+        )
+        check(
             MusicController.eventData(for: .playPause, isKeyDown: true) == (16 << 16) | (0xA << 8)
                 && MusicController.eventData(for: .playPause, isKeyDown: false) == (16 << 16) | (0xB << 8)
                 && MusicController.eventModifierFlags(isKeyDown: true).rawValue == 0xA00
@@ -90,6 +236,22 @@ enum JoiSelfTest {
             MusicController.canControlTransport(activeSupportedMediaAudio: true)
                 && !MusicController.canControlTransport(activeSupportedMediaAudio: false),
             "transport guard requires active supported media",
+            failures: &failures
+        )
+        check(
+            MusicController.canUseMediaKeyFallback(
+                hasActiveOutput: true,
+                matchesLastValidatedOwner: false
+            )
+                && MusicController.canUseMediaKeyFallback(
+                    hasActiveOutput: false,
+                    matchesLastValidatedOwner: true
+                )
+                && !MusicController.canUseMediaKeyFallback(
+                    hasActiveOutput: false,
+                    matchesLastValidatedOwner: false
+                ),
+            "paused media can resume only for the last validated owner",
             failures: &failures
         )
         check(
@@ -130,11 +292,164 @@ enum JoiSelfTest {
         check(music.script(for: .next, player: .music).isEmpty, "transport controls cannot launch a named player", failures: &failures)
         check(music.script(for: .shuffle, player: .spotify) == "tell application \"Spotify\" to set shuffling to not shuffling", "Spotify command", failures: &failures)
         check(music.script(for: .favorite, player: .spotify).isEmpty, "Spotify read-only favorite is not misrepresented", failures: &failures)
+        check(
+            MusicController.arcSpotifyJavaScript(for: .shuffle)?.contains("control-button-shuffle") == true
+                && MusicController.arcSpotifyJavaScript(for: .favorite)?.contains("now-playing-widget") == true
+                && MusicController.arcSpotifyJavaScript(for: .favorite)?.contains("add-button") == true
+                && MusicController.arcSpotifyJavaScript(for: .favorite)?.contains("playbackState === 'playing'") == true
+                && MusicController.arcSpotifyAppleScript(for: .favorite)?.contains(
+                    "on error errorMessage number errorNumber"
+                ) == true
+                && MusicController.arcSpotifyAppleScript(for: .favorite)?.contains(
+                    "activeTabCount is not 1 or spotifyPlayingCount is not 1"
+                ) == true
+                && MusicController.arcSpotifyJavaScript(for: .playPause) == nil,
+            "Arc Spotify integration requires unambiguous active playback and explicit feature controls",
+            failures: &failures
+        )
+        var arcScriptCompileError: NSDictionary?
+        let arcScriptCompiled = MusicController.arcSpotifyAppleScript(for: .favorite)
+            .flatMap(NSAppleScript.init(source:))?
+            .compileAndReturnError(&arcScriptCompileError) == true
+        check(
+            arcScriptCompiled && arcScriptCompileError == nil,
+            "Arc Spotify automation script compiles without executing",
+            failures: &failures
+        )
 
         let suiteName = "JoiSelfTest-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         let panelTimer = PomodoroTimer(seconds: 1, completionSound: {}, completionNotification: {})
-        let panelModel = AppModel(defaults: defaults, pomodoro: panelTimer)
+        var voiceOpenCount = 0
+        let panelModel = AppModel(
+            defaults: defaults,
+            pomodoro: panelTimer,
+            openChatGPTVoice: {
+                voiceOpenCount += 1
+                return true
+            }
+        )
+        panelModel.activateVoice()
+        check(
+            panelModel.activePanel == .voice
+                && panelModel.voiceHandoff == .opened
+                && voiceOpenCount == 1,
+            "Voice opens ChatGPT once without an API key or fake listening state",
+            failures: &failures
+        )
+        panelModel.activateVoice()
+        check(
+            panelModel.activePanel == .none && voiceOpenCount == 1,
+            "second Voice click only closes Joi's local instructions",
+            failures: &failures
+        )
+        var quitCount = 0
+        panelModel.onQuit = { quitCount += 1 }
+        panelModel.quitJoi()
+        check(
+            quitCount == 1,
+            "avatar context-menu Close Joi requests application termination",
+            failures: &failures
+        )
+        let failedVoiceModel = AppModel(
+            defaults: defaults,
+            pomodoro: PomodoroTimer(seconds: 1, completionSound: {}, completionNotification: {}),
+            openChatGPTVoice: { false }
+        )
+        failedVoiceModel.activateVoice()
+        check(
+            failedVoiceModel.voiceHandoff == .failed,
+            "failed browser handoff is reported",
+            failures: &failures
+        )
+
+        var observedScale: Double?
+        panelModel.onAvatarScaleChange = { observedScale = $0 }
+        panelModel.avatarScale = 1.35
+        check(
+            observedScale == 1.35 && defaults.double(forKey: "joi.avatarScale") == 1.35,
+            "avatar scale callback and persistence",
+            failures: &failures
+        )
+        let reloadedModel = AppModel(
+            defaults: defaults,
+            pomodoro: PomodoroTimer(seconds: 1, completionSound: {}, completionNotification: {}),
+            openChatGPTVoice: { false }
+        )
+        check(reloadedModel.avatarScale == 1.35, "avatar scale reloads", failures: &failures)
+        panelModel.avatarScale = 5
+        check(
+            panelModel.avatarScale == 1.40
+                && defaults.double(forKey: "joi.avatarScale") == 1.40
+                && observedScale == 1.40,
+            "avatar scale setter clamps, persists, and resizes",
+            failures: &failures
+        )
+
+        check(
+            panelModel.menuAutoCloseSeconds == MenuInactivityPolicy.defaultSeconds,
+            "control menu inactivity timeout defaults to 15 seconds",
+            failures: &failures
+        )
+        panelModel.menuAutoCloseSeconds = 35
+        let timeoutReloadedModel = AppModel(
+            defaults: defaults,
+            pomodoro: PomodoroTimer(seconds: 1, completionSound: {}, completionNotification: {}),
+            openChatGPTVoice: { false }
+        )
+        check(
+            timeoutReloadedModel.menuAutoCloseSeconds == 35,
+            "control menu inactivity timeout persists",
+            failures: &failures
+        )
+        panelModel.isExpanded = true
+        panelTimer.reset()
+        panelTimer.start()
+        check(
+            panelModel.closeMenuIfInactive(
+                now: Date().addingTimeInterval(TimeInterval(panelModel.menuAutoCloseSeconds + 1))
+            )
+                && !panelModel.isExpanded
+                && panelTimer.state == .running,
+            "inactivity closes controls without stopping an active Focus timer",
+            failures: &failures
+        )
+        panelTimer.reset()
+
+        check(!panelModel.addFocusTask("   "), "blank Focus tasks are rejected", failures: &failures)
+        for index in 1 ... panelModel.focusTaskLimit {
+            check(
+                panelModel.addFocusTask("Task \(index)"),
+                "Focus task \(index) is accepted",
+                failures: &failures
+            )
+        }
+        check(
+            !panelModel.addFocusTask("Task 11") && panelModel.focusTasks.count == 10,
+            "Focus task list stops at ten",
+            failures: &failures
+        )
+        let firstFocusTask = panelModel.focusTasks[0]
+        panelModel.toggleFocusTask(id: firstFocusTask.id)
+        let taskReloadedModel = AppModel(
+            defaults: defaults,
+            pomodoro: PomodoroTimer(seconds: 1, completionSound: {}, completionNotification: {}),
+            openChatGPTVoice: { false }
+        )
+        check(
+            taskReloadedModel.focusTasks.count == 10
+                && taskReloadedModel.focusTasks[0].id == firstFocusTask.id
+                && taskReloadedModel.focusTasks[0].isCompleted,
+            "Focus tasks and checkmarks persist",
+            failures: &failures
+        )
+        panelModel.removeFocusTask(id: firstFocusTask.id)
+        check(
+            panelModel.addFocusTask("Replacement") && panelModel.focusTasks.count == 10,
+            "deleting a Focus task frees a slot",
+            failures: &failures
+        )
+
         panelModel.togglePanel(.pomodoro)
         check(panelModel.activePanel == .pomodoro, "Focus panel opens", failures: &failures)
         panelModel.togglePanel(.pomodoro)
@@ -146,7 +461,7 @@ enum JoiSelfTest {
         defaults.removePersistentDomain(forName: suiteName)
 
         if failures.isEmpty {
-            print("Joi macOS self-test: 35 checks passed")
+            print("Joi macOS self-test: all checks passed")
         } else {
             failures.forEach { print("FAIL: \($0)") }
             print("Joi macOS self-test: \(failures.count) failure(s)")

@@ -6,33 +6,68 @@ enum JoiPreviewRenderer {
     static func render(to directory: URL, model: AppModel) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
+        let originalScale = model.avatarScale
+        defer { model.avatarScale = originalScale }
+        model.avatarScale = CompanionLayout.defaultAvatarScale
+
         model.isExpanded = true
         model.activePanel = .none
+        let expandedSize = CompanionLayout.expandedSize(scale: model.avatarScale)
         try write(
-            FloatingCompanionView(model: model).frame(width: 560, height: 520),
-            size: CGSize(width: 560, height: 520),
+            FloatingCompanionView(model: model).frame(width: expandedSize.width, height: expandedSize.height),
+            size: expandedSize,
             to: directory.appendingPathComponent("radial-menu.png")
         )
 
         model.activePanel = .pomodoro
+        ["Finish the outline", "Reply to Sam", "Book the table", "Send the files"].forEach {
+            _ = model.addFocusTask($0)
+        }
+        if let completed = model.focusTasks.dropFirst().first {
+            model.toggleFocusTask(id: completed.id)
+        }
         try write(
-            FloatingCompanionView(model: model).frame(width: 560, height: 520),
-            size: CGSize(width: 560, height: 520),
+            FloatingCompanionView(model: model).frame(width: expandedSize.width, height: expandedSize.height),
+            size: expandedSize,
             to: directory.appendingPathComponent("focus-timer.png")
         )
 
+        model.avatarScale = 1.40
+        let largeExpandedSize = CompanionLayout.expandedSize(scale: model.avatarScale)
+        try write(
+            FloatingCompanionView(model: model).frame(
+                width: largeExpandedSize.width,
+                height: largeExpandedSize.height
+            ),
+            size: largeExpandedSize,
+            to: directory.appendingPathComponent("focus-timer-large.png")
+        )
+
+        model.avatarScale = CompanionLayout.defaultAvatarScale
+
         model.activePanel = .voice
         try write(
-            FloatingCompanionView(model: model).frame(width: 560, height: 520),
-            size: CGSize(width: 560, height: 520),
+            FloatingCompanionView(model: model).frame(width: expandedSize.width, height: expandedSize.height),
+            size: expandedSize,
             to: directory.appendingPathComponent("voice-mode.png")
         )
 
         try write(
-            SettingsView(model: model).frame(width: 540, height: 650),
-            size: CGSize(width: 540, height: 650),
+            SettingsView(model: model).frame(width: 540, height: 880),
+            size: CGSize(width: 540, height: 880),
             to: directory.appendingPathComponent("settings.png")
         )
+
+        model.isExpanded = false
+        for (name, scale) in [("avatar-small.png", 0.70), ("avatar-large.png", 1.40)] {
+            model.avatarScale = scale
+            let size = CompanionLayout.collapsedSize(scale: scale)
+            try write(
+                FloatingCompanionView(model: model).frame(width: size.width, height: size.height),
+                size: size,
+                to: directory.appendingPathComponent(name)
+            )
+        }
     }
 
     private static func write<Content: View>(_ view: Content, size: CGSize, to url: URL) throws {

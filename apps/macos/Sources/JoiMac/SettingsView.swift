@@ -3,7 +3,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
-    @State private var apiKey = ""
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var launchMessage: String?
 
@@ -12,6 +11,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 header
                 voiceSection
+                musicSection
                 behaviorSection
                 aboutSection
             }
@@ -20,6 +20,10 @@ struct SettingsView: View {
         .frame(width: 540)
         .frame(minHeight: 570)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { model.music.refreshAccessibilityPermission() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.music.refreshAccessibilityPermission()
+        }
     }
 
     private var header: some View {
@@ -40,52 +44,28 @@ struct SettingsView: View {
     }
 
     private var voiceSection: some View {
-        SettingsCard(title: "OpenAI Voice Assistant", icon: "waveform.circle.fill") {
+        SettingsCard(title: "ChatGPT Voice", icon: "waveform.circle.fill") {
             VStack(alignment: .leading, spacing: 13) {
-                LabeledContent("Model") {
-                    Text(RealtimeVoiceService.model)
-                        .font(.system(.body, design: .monospaced))
-                }
-                LabeledContent("Voice") {
-                    Picker("Voice", selection: $model.selectedVoice) {
-                        ForEach(AppModel.availableVoices, id: \.self) { voice in
-                            Text(voice.capitalized).tag(voice)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 140)
-                }
-
-                Divider()
-
-                Text(model.hasAPIKey ? "An API key is stored in macOS Keychain." : "No API key is stored yet.")
+                Text("Voice now opens the official ChatGPT website in your default browser. No API key is needed in Joi.")
                     .font(.caption)
-                    .foregroundStyle(model.hasAPIKey ? Color.green : Color.secondary)
-
-                HStack {
-                    SecureField("Paste a new OpenAI API key", text: $apiKey)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Save") {
-                        model.saveAPIKey(apiKey)
-                        apiKey = ""
-                    }
-                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Button("Remove", role: .destructive) { model.removeAPIKey() }
-                        .disabled(!model.hasAPIKey)
+                    .foregroundStyle(.secondary)
+                LabeledContent("Recommended voice") {
+                    Text("Maple")
+                        .fontWeight(.semibold)
                 }
-
-                Text("Use your own project key. Joi stores it only in your local Keychain; it is never included in the app or repository.")
+                Text("After ChatGPT opens, select its Voice icon once and allow browser microphone access. You can then return to your other apps while the conversation continues if your ChatGPT settings support background conversations.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-
-                Text("Voice personality")
-                    .font(.caption.weight(.semibold))
-                TextEditor(text: $model.personaInstructions)
-                    .font(.system(size: 12))
-                    .frame(height: 104)
-                    .padding(5)
-                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
+                HStack {
+                    Button("Open ChatGPT") { model.openChatGPTVoiceFromSettings() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                        .magneticHover(enabled: !model.reducedMotion)
+                    Button("Remove old Joi API key…", role: .destructive) {
+                        model.removeLegacyAPIKey()
+                    }
+                    .magneticHover(enabled: !model.reducedMotion)
+                }
 
                 if let message = model.settingsMessage {
                     Text(message)
@@ -96,14 +76,106 @@ struct SettingsView: View {
         }
     }
 
+    private var musicSection: some View {
+        SettingsCard(title: "Music Controls", icon: "play.circle.fill") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label(
+                        model.music.accessibilityGranted ? "Ready" : "Ready through Now Playing",
+                        systemImage: model.music.accessibilityGranted ? "checkmark.circle.fill" : "music.note"
+                    )
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(model.music.accessibilityGranted ? Color.green : Color.secondary)
+                    Spacer()
+                    Button {
+                        model.music.openAccessibilitySettings()
+                    } label: {
+                        Image(systemName: "hand.raised.fill")
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .magneticHover(enabled: !model.reducedMotion)
+                    .help("Open Accessibility Settings")
+                    .accessibilityLabel("Open Accessibility Settings")
+                    if model.music.automationPermissionRequired {
+                        Button {
+                            model.music.openAutomationSettings()
+                        } label: {
+                            Image(systemName: "cursorarrow.click.2")
+                                .frame(width: 24, height: 24)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.orange)
+                        .magneticHover(enabled: !model.reducedMotion)
+                        .help("Allow Joi to control Spotify in Arc")
+                        .accessibilityLabel("Allow Joi to control Spotify in Arc")
+                    }
+                }
+
+                Text("Transport controls follow the current macOS Now Playing source. Shuffle and Favorite use the current player's supported commands, with a local Spotify Web control when Arc owns Now Playing.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private var behaviorSection: some View {
         SettingsCard(title: "Companion", icon: "sparkles") {
             VStack(alignment: .leading, spacing: 13) {
+                HStack {
+                    Label("Avatar size", systemImage: "person.crop.circle")
+                    Spacer()
+                    Text(model.avatarScale, format: .percent.precision(.fractionLength(0)))
+                        .font(.system(.body, design: .monospaced).weight(.semibold))
+                    Button("Default") { model.avatarScale = CompanionLayout.defaultAvatarScale }
+                        .disabled(abs(model.avatarScale - CompanionLayout.defaultAvatarScale) < 0.001)
+                        .magneticHover(enabled: !model.reducedMotion)
+                }
+                HStack(spacing: 10) {
+                    Image(systemName: "person.crop.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Slider(
+                        value: $model.avatarScale,
+                        in: CompanionLayout.avatarScaleRange,
+                        step: CompanionLayout.avatarScaleStep
+                    )
+                    .accessibilityLabel("Avatar size")
+                    .accessibilityValue(
+                        Text(model.avatarScale, format: .percent.precision(.fractionLength(0)))
+                    )
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+
+                Divider()
+
+                HStack {
+                    Label("Close controls after inactivity", systemImage: "clock.arrow.circlepath")
+                    Spacer()
+                    Text("\(model.menuAutoCloseSeconds) seconds")
+                        .font(.system(.body, design: .monospaced).weight(.semibold))
+                }
+                Slider(
+                    value: Binding(
+                        get: { Double(model.menuAutoCloseSeconds) },
+                        set: { model.menuAutoCloseSeconds = Int($0.rounded()) }
+                    ),
+                    in: Double(MenuInactivityPolicy.secondsRange.lowerBound)
+                        ... Double(MenuInactivityPolicy.secondsRange.upperBound),
+                    step: Double(MenuInactivityPolicy.secondsStep)
+                )
+                .accessibilityLabel("Control menu inactivity timeout")
+                .accessibilityValue("\(model.menuAutoCloseSeconds) seconds")
+
+                Divider()
+
                 Toggle("Keep Joi above other windows", isOn: $model.alwaysOnTop)
                 Toggle("Reduce animation", isOn: $model.reducedMotion)
                 Toggle("Launch Joi at login", isOn: Binding(
                     get: { launchAtLogin },
-                    set: updateLaunchAtLogin
+                    set: { enabled in updateLaunchAtLogin(enabled) }
                 ))
                 if let launchMessage {
                     Text(launchMessage)
@@ -132,6 +204,7 @@ struct SettingsView: View {
                         .foregroundStyle(.tertiary)
                     Spacer()
                     Button("Quit Joi") { NSApplication.shared.terminate(nil) }
+                        .magneticHover(enabled: !model.reducedMotion)
                 }
             }
         }

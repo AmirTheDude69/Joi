@@ -11,16 +11,34 @@ final class AppModel: ObservableObject {
         case pomodoro
     }
 
+    enum VoiceHandoff: Equatable {
+        case ready
+        case opened
+        case failed
+    }
+
     @Published var isExpanded = false {
         didSet {
-            avatarMotion.play(isExpanded ? .runningRight : .runningLeft)
-            if !isExpanded {
+            guard oldValue != isExpanded else { return }
+            if isExpanded {
+                avatarMotion.play(.runningRight)
+                lastMenuInteraction = Date()
+                startMenuAutoCloseLoop()
+            } else {
+                cancelMenuAutoCloseLoop()
                 activePanel = .none
+                avatarMotion.play(.runningLeft)
             }
             onExpandedChange?(isExpanded)
         }
     }
-    @Published var activePanel: ActivePanel = .none
+    @Published var activePanel: ActivePanel = .none {
+        didSet {
+            if oldValue != activePanel {
+                noteMenuInteraction()
+            }
+        }
+    }
     @Published var alwaysOnTop: Bool {
         didSet {
             defaults.set(alwaysOnTop, forKey: Keys.alwaysOnTop)
@@ -31,6 +49,29 @@ final class AppModel: ObservableObject {
         didSet {
             defaults.set(reducedMotion, forKey: Keys.reducedMotion)
             avatarMotion.setReducedMotion(reducedMotion)
+        }
+    }
+    @Published var avatarScale: Double {
+        didSet {
+            let normalized = CompanionLayout.normalizedScale(avatarScale)
+            if normalized != avatarScale {
+                avatarScale = normalized
+            }
+            defaults.set(normalized, forKey: Keys.avatarScale)
+            onAvatarScaleChange?(normalized)
+        }
+    }
+    @Published var menuAutoCloseSeconds: Int {
+        didSet {
+            let normalized = MenuInactivityPolicy.normalizedSeconds(menuAutoCloseSeconds)
+            if normalized != menuAutoCloseSeconds {
+                menuAutoCloseSeconds = normalized
+            }
+            defaults.set(normalized, forKey: Keys.menuAutoCloseSeconds)
+            if isExpanded {
+                lastMenuInteraction = Date()
+                startMenuAutoCloseLoop()
+            }
         }
     }
     @Published var pomodoroMinutes: Int {
@@ -46,72 +87,66 @@ final class AppModel: ObservableObject {
             }
         }
     }
-    @Published var selectedVoice: String {
-        didSet {
-            defaults.set(selectedVoice, forKey: Keys.selectedVoice)
-            if voice.status.isConnected {
-                voice.disconnect()
-                activePanel = .none
-            }
-        }
-    }
-    @Published var personaInstructions: String {
-        didSet { defaults.set(personaInstructions, forKey: Keys.personaInstructions) }
-    }
     @Published var settingsMessage: String?
+    @Published private(set) var voiceHandoff: VoiceHandoff = .ready
+    @Published private(set) var focusTasks: [FocusTaskItem]
 
-    let voice = RealtimeVoiceService()
     let pomodoro: PomodoroTimer
     let music = MusicController()
     let avatarMotion = AvatarMotionController()
+    let focusTaskLimit = 10
 
     var onExpandedChange: ((Bool) -> Void)?
+    var onAvatarScaleChange: ((Double) -> Void)?
     var onAlwaysOnTopChange: ((Bool) -> Void)?
     var onOpenSettings: (() -> Void)?
+    var onQuit: (() -> Void)?
     var onWindowDrag: ((CGSize) -> Void)?
     var onWindowDragEnded: (() -> Void)?
 
     private let defaults: UserDefaults
     private let keychain: KeychainStore
+    private let openChatGPTVoiceURL: @MainActor () -> Bool
     private var cancellables: Set<AnyCancellable> = []
-
-    static let availableVoices = [
-        "shimmer", "marin", "coral", "sage", "alloy", "ash", "ballad", "echo", "verse", "cedar",
-    ]
-
-    static let defaultPersona = """
-    You are Joi, a warm, upbeat AI assistant represented by a tiny ginger-haired chibi avatar. Always be transparent that you are an AI inspired by the character, never the user's real partner or a human. This is a continuous realtime voice conversation: listen naturally, begin replying as soon as the user finishes a turn, allow interruptions gracefully, and never ask the user to press another control between turns. Speak with bright, affectionate warmth, gentle confidence, quick wit, and a light smile in your voice. Keep spoken turns concise and conversational. Use lively but not exaggerated intonation, a clear youthful adult voice, and a slightly brisk pace. Be supportive without dependency, jealousy, guilt, or romantic impersonation. Ask before consequential actions and never claim an action succeeded unless it did.
-    """
+    private var menuAutoCloseTask: Task<Void, Never>?
+    private var lastMenuInteraction = Date.distantPast
 
     init(
         defaults: UserDefaults = .standard,
         keychain: KeychainStore = KeychainStore(),
-        pomodoro: PomodoroTimer? = nil
+        pomodoro: PomodoroTimer? = nil,
+        openChatGPTVoice: @escaping @MainActor () -> Bool = ChatGPTVoiceLauncher.open
     ) {
         let storedMinutes = defaults.object(forKey: Keys.pomodoroMinutes) as? Int ?? 25
+        let storedScale = defaults.object(forKey: Keys.avatarScale) as? Double
+            ?? CompanionLayout.defaultAvatarScale
+        let storedMenuAutoCloseSeconds = defaults.object(
+            forKey: Keys.menuAutoCloseSeconds
+        ) as? Int ?? MenuInactivityPolicy.defaultSeconds
         self.defaults = defaults
         self.keychain = keychain
+        openChatGPTVoiceURL = openChatGPTVoice
         self.pomodoro = pomodoro ?? PomodoroTimer(minutes: storedMinutes)
+        focusTasks = Self.loadFocusTasks(from: defaults)
         alwaysOnTop = defaults.object(forKey: Keys.alwaysOnTop) as? Bool ?? true
         reducedMotion = defaults.object(forKey: Keys.reducedMotion) as? Bool ?? false
+        avatarScale = CompanionLayout.normalizedScale(storedScale)
+        menuAutoCloseSeconds = MenuInactivityPolicy.normalizedSeconds(
+            storedMenuAutoCloseSeconds
+        )
         pomodoroMinutes = storedMinutes
-        selectedVoice = defaults.string(forKey: Keys.selectedVoice) ?? "shimmer"
-        personaInstructions = defaults.string(forKey: Keys.personaInstructions) ?? Self.defaultPersona
         avatarMotion.setReducedMotion(reducedMotion)
-        voice.objectWillChange
-            .merge(with: self.pomodoro.objectWillChange)
+        self.pomodoro.objectWillChange
             .merge(with: avatarMotion.objectWillChange)
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 
-        Publishers.CombineLatest3(
-            voice.$status.removeDuplicates(),
+        Publishers.CombineLatest(
             self.pomodoro.$state.removeDuplicates(),
             $activePanel.removeDuplicates()
         )
-        .sink { [weak self] voiceStatus, pomodoroState, activePanel in
+        .sink { [weak self] pomodoroState, activePanel in
             self?.updateAvatar(
-                voiceStatus: voiceStatus,
                 pomodoroState: pomodoroState,
                 activePanel: activePanel
             )
@@ -119,21 +154,36 @@ final class AppModel: ObservableObject {
         .store(in: &cancellables)
     }
 
-    var hasAPIKey: Bool {
-        (try? keychain.readAPIKey())?.isEmpty == false
-    }
-
     var avatarAnimation: SpriteAnimation {
         avatarMotion.animation
     }
 
     func toggleExpanded() {
-        if isExpanded, case .error = voice.status {
-            voice.disconnect()
-        }
         withAnimationPreference {
             isExpanded.toggle()
         }
+    }
+
+    func noteMenuInteraction() {
+        lastMenuInteraction = Date()
+        guard isExpanded, menuAutoCloseTask == nil else { return }
+        startMenuAutoCloseLoop()
+    }
+
+    @discardableResult
+    func closeMenuIfInactive(now: Date = Date()) -> Bool {
+        guard isExpanded,
+              MenuInactivityPolicy.shouldClose(
+                  lastInteraction: lastMenuInteraction,
+                  now: now,
+                  timeoutSeconds: menuAutoCloseSeconds
+              )
+        else { return false }
+        cancelMenuAutoCloseLoop()
+        withAnimationPreference {
+            isExpanded = false
+        }
+        return true
     }
 
     func togglePanel(_ panel: ActivePanel) {
@@ -143,10 +193,10 @@ final class AppModel: ObservableObject {
     }
 
     func openSettings() {
-        avatarMotion.play(.review)
         if isExpanded {
             isExpanded = false
         }
+        avatarMotion.play(.review)
         onOpenSettings?()
     }
 
@@ -155,57 +205,49 @@ final class AppModel: ObservableObject {
         isExpanded = false
     }
 
+    func quitJoi() {
+        onQuit?()
+    }
+
     func searchGoogle(_ query: String) {
         guard let url = GoogleSearch.url(for: query) else { return }
-        avatarMotion.play(.review)
         NSWorkspace.shared.open(url)
         activePanel = .none
+        avatarMotion.play(.review)
     }
 
-    /// The radial Voice button is the complete interaction: one click connects and
-    /// starts listening, and the next click stops and closes it.
+    /// ChatGPT's web voice UI requires its own explicit Voice-button click and
+    /// browser microphone permission. Joi opens the official site and explains
+    /// that handoff without pretending it can observe the external session.
     func activateVoice() {
-        if voice.status.isConnected {
-            voice.disconnect()
-            activePanel = .none
-            return
-        }
-        if case .error = voice.status {
-            voice.disconnect()
-            activePanel = .none
-            return
-        }
         if activePanel == .voice {
-            voice.disconnect()
             activePanel = .none
             return
         }
-
-        guard let apiKey = try? keychain.readAPIKey(), !apiKey.isEmpty else {
-            activePanel = .none
-            settingsMessage = "Add an OpenAI API key in Settings first."
-            openSettings()
-            return
-        }
-
         activePanel = .voice
-        Task {
-            await voice.connect(
-                apiKey: apiKey,
-                voice: selectedVoice,
-                instructions: personaInstructions
-            )
-        }
+        applyVoiceHandoff(openChatGPTVoiceURL())
     }
 
-    func dismissVoiceError() {
-        guard case .error = voice.status else { return }
-        voice.disconnect()
+    func openChatGPTVoiceAgain() {
+        applyVoiceHandoff(openChatGPTVoiceURL())
+    }
+
+    func openChatGPTVoiceFromSettings() {
+        settingsMessage = openChatGPTVoiceURL()
+            ? "ChatGPT opened. Select its Voice icon and allow microphone access."
+            : "ChatGPT could not be opened in your default browser."
+    }
+
+    func dismissVoiceHandoff() {
         activePanel = .none
     }
 
     func performMusic(_ action: MusicController.Action) {
-        music.perform(action)
+        noteMenuInteraction()
+        guard music.perform(action) else {
+            avatarMotion.play(.failed)
+            return
+        }
         switch action {
         case .favorite:
             avatarMotion.playSequence([.jumping, .waving])
@@ -214,25 +256,42 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func saveAPIKey(_ value: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            settingsMessage = "Enter a key before saving."
+    @discardableResult
+    func addFocusTask(_ title: String) -> Bool {
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, focusTasks.count < focusTaskLimit else {
+            return false
+        }
+        focusTasks.append(FocusTaskItem(title: normalized))
+        persistFocusTasks()
+        noteMenuInteraction()
+        avatarMotion.play(.review)
+        return true
+    }
+
+    func toggleFocusTask(id: FocusTaskItem.ID) {
+        guard let index = focusTasks.firstIndex(where: { $0.id == id }) else {
             return
         }
-        do {
-            try keychain.saveAPIKey(trimmed)
-            settingsMessage = "API key saved securely in macOS Keychain."
-        } catch {
-            settingsMessage = "The key could not be saved: \(error.localizedDescription)"
+        focusTasks[index].isCompleted.toggle()
+        persistFocusTasks()
+        noteMenuInteraction()
+        if focusTasks[index].isCompleted {
+            let allComplete = !focusTasks.isEmpty && focusTasks.allSatisfy(\.isCompleted)
+            avatarMotion.playSequence(allComplete ? [.jumping, .waving] : [.waving])
         }
     }
 
-    func removeAPIKey() {
-        voice.disconnect()
+    func removeFocusTask(id: FocusTaskItem.ID) {
+        focusTasks.removeAll { $0.id == id }
+        persistFocusTasks()
+        noteMenuInteraction()
+    }
+
+    func removeLegacyAPIKey() {
         do {
             try keychain.deleteAPIKey()
-            settingsMessage = "API key removed."
+            settingsMessage = "The unused legacy API key was removed from Keychain."
         } catch {
             settingsMessage = "The key could not be removed: \(error.localizedDescription)"
         }
@@ -246,20 +305,66 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func applyVoiceHandoff(_ opened: Bool) {
+        voiceHandoff = opened ? .opened : .failed
+        if opened {
+            avatarMotion.setContext(.waiting)
+        } else {
+            avatarMotion.setContext(nil)
+            avatarMotion.play(.failed)
+        }
+    }
+
+    private func startMenuAutoCloseLoop() {
+        cancelMenuAutoCloseLoop()
+        guard isExpanded else { return }
+        menuAutoCloseTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let timeout = TimeInterval(self.menuAutoCloseSeconds)
+                let elapsed = Date().timeIntervalSince(self.lastMenuInteraction)
+                let remaining = max(0.05, timeout - elapsed)
+                do {
+                    try await Task.sleep(for: .seconds(remaining))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                if self.closeMenuIfInactive() {
+                    return
+                }
+            }
+        }
+    }
+
+    private func cancelMenuAutoCloseLoop() {
+        menuAutoCloseTask?.cancel()
+        menuAutoCloseTask = nil
+    }
+
+    private func persistFocusTasks() {
+        guard let data = try? JSONEncoder().encode(focusTasks) else { return }
+        defaults.set(data, forKey: Keys.focusTasks)
+    }
+
+    private static func loadFocusTasks(from defaults: UserDefaults) -> [FocusTaskItem] {
+        guard let data = defaults.data(forKey: Keys.focusTasks),
+              let decoded = try? JSONDecoder().decode([FocusTaskItem].self, from: data)
+        else { return [] }
+        return decoded
+            .filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .prefix(10)
+            .map { $0 }
+    }
+
     private func updateAvatar(
-        voiceStatus: RealtimeVoiceService.Status,
         pomodoroState: PomodoroTimer.State,
         activePanel: ActivePanel
     ) {
         let context: SpriteAnimation?
-        switch voiceStatus {
-        case .error:
-            context = .failed
-        case .speaking:
-            context = .waving
-        case .connecting, .listening:
+        if activePanel == .voice {
             context = .waiting
-        case .disconnected:
+        } else {
             if pomodoroState == .running {
                 context = .working
             } else if pomodoroState == .paused {
@@ -272,7 +377,7 @@ final class AppModel: ObservableObject {
         }
         avatarMotion.setContext(context)
 
-        if pomodoroState == .completed, lastPomodoroState != .completed, !voiceStatus.isConnected {
+        if pomodoroState == .completed, lastPomodoroState != .completed {
             avatarMotion.playSequence([.jumping, .waving])
         }
         lastPomodoroState = pomodoroState
@@ -283,8 +388,9 @@ final class AppModel: ObservableObject {
     private enum Keys {
         static let alwaysOnTop = "joi.alwaysOnTop"
         static let reducedMotion = "joi.reducedMotion"
+        static let avatarScale = "joi.avatarScale"
+        static let menuAutoCloseSeconds = "joi.menuAutoCloseSeconds"
         static let pomodoroMinutes = "joi.pomodoroMinutes"
-        static let selectedVoice = "joi.selectedVoice"
-        static let personaInstructions = "joi.personaInstructions"
+        static let focusTasks = "joi.focusTasks"
     }
 }
