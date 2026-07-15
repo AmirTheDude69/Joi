@@ -13,6 +13,7 @@ final class AvatarMotionController: ObservableObject {
     private var transientTask: Task<Void, Never>?
     private var transientToken: UUID?
     private var ambientTask: Task<Void, Never>?
+    private var musicTask: Task<Void, Never>?
     private var ambientIndex = 0
     private var contextIndex = 0
     private var musicIsPlaying = false
@@ -27,6 +28,11 @@ final class AvatarMotionController: ObservableObject {
         ambientTask = Task { [weak self] in
             await self?.runAmbientLoop()
         }
+    }
+
+    deinit {
+        ambientTask?.cancel()
+        musicTask?.cancel()
     }
 
     var allowsGazeTracking: Bool {
@@ -105,10 +111,48 @@ final class AvatarMotionController: ObservableObject {
     /// Music is a low-priority ambient state: explicit app actions and
     /// persistent voice/focus/search contexts always remain authoritative.
     func setMusicPlaying(_ playing: Bool) {
-        guard musicIsPlaying != playing else { return }
+        guard musicIsPlaying != playing else {
+            if playing {
+                reconcileMusicAnimation()
+            }
+            return
+        }
         musicIsPlaying = playing
+        if playing {
+            startMusicLoop()
+        } else {
+            musicTask?.cancel()
+            musicTask = nil
+        }
         guard contextAnimation == nil, transientToken == nil else { return }
         applyRestingState()
+    }
+
+    /// Playback is sampled independently from animation timing. Reasserting the
+    /// low-priority dance state prevents a completed ambient/transient gesture or
+    /// a delayed SwiftUI update from leaving Joi motionless while music continues.
+    private func startMusicLoop() {
+        musicTask?.cancel()
+        musicTask = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.reconcileMusicAnimation()
+                do {
+                    try await Task.sleep(for: .seconds(1.5))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func reconcileMusicAnimation() {
+        guard musicIsPlaying,
+              contextAnimation == nil,
+              transientToken == nil else { return }
+        if animation != .dancing
+            || isAnimating == isReducedMotionEnabled {
+            applyRestingState()
+        }
     }
 
     private func startContextLoop(_ context: SpriteAnimation) {

@@ -98,9 +98,9 @@ Build the universal DMG on macOS:
 pnpm build:macos
 ```
 
-Or use the checked-in private-beta installer: [Joi 0.7.0 universal DMG](releases/Joi-0.7.0-macOS-Universal.dmg).
+Or use the checked-in private-beta installer: [Joi 0.7.1 universal DMG](releases/Joi-0.7.1-macOS-Universal.dmg).
 
-Open `releases/Joi-0.7.0-macOS-Universal.dmg`, drag Joi to Applications, then Control-click **Joi** and choose **Open** on first launch. Click the avatar to reveal transparent glass radial controls and the icon-only watch-style music cluster. Magnetic hover applies to every floating button, inactive controls auto-close after a configurable delay, Focus supports ten active tasks plus a persistent Archive, and Settings provides separate Avatar Size and Control Radius sliders. Voice opens the official ChatGPT website without showing a local handoff card; select ChatGPT's Voice icon once and allow browser microphone access. The music cluster follows the current macOS Now Playing source, changes between Play and Pause in real time, and starts or stops Joi's standalone dance as the source's actual playback state changes.
+Open `releases/Joi-0.7.1-macOS-Universal.dmg`, drag Joi to Applications, then Control-click **Joi** and choose **Open** on first launch. Click the avatar to reveal transparent glass radial controls and the icon-only watch-style music cluster. Magnetic hover applies to every floating button, inactive controls auto-close after a configurable delay, Focus supports ten active tasks plus a persistent Archive, and Settings provides separate Avatar Size and Control Radius sliders. Voice opens the official ChatGPT website without showing a local handoff card; select ChatGPT's Voice icon once and allow browser microphone access. For Spotify Web in Arc, Joi controls the open player tab directly, reads its actual Play/Pause control for live state, and keeps the standalone dance active throughout playback.
 
 See the full [macOS walkthrough](apps/macos/README.md) and OpenAI's [ChatGPT Voice guide](https://help.openai.com/en/articles/20001274/).
 

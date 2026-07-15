@@ -4,6 +4,33 @@ import CoreAudio
 import Foundation
 import MediaRemoteShim
 
+private final class ArcAppleScriptExecutor: @unchecked Sendable {
+    private let lock = NSLock()
+    private var compiledScripts: [String: NSAppleScript] = [:]
+
+    func execute(key: String, source: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let script: NSAppleScript
+        if let cached = compiledScripts[key] {
+            script = cached
+        } else {
+            guard let candidate = NSAppleScript(source: source) else { return nil }
+            var compileError: NSDictionary?
+            guard candidate.compileAndReturnError(&compileError) else { return nil }
+            compiledScripts[key] = candidate
+            script = candidate
+        }
+
+        var executionError: NSDictionary?
+        let result = script.executeAndReturnError(&executionError).stringValue
+        return executionError == nil ? result : nil
+    }
+}
+
+private let arcAppleScriptExecutor = ArcAppleScriptExecutor()
+
 @MainActor
 final class MusicController: ObservableObject {
     enum Action: String, CaseIterable, Identifiable {
@@ -97,7 +124,7 @@ final class MusicController: ObservableObject {
 
     private var pendingAction: Action?
     private var pendingOwnerBundleIdentifier: String?
-    private var lastValidatedOwnerBundleIdentifier: String?
+    private var lastKnownMediaOwnerBundleIdentifier: String?
     private let playbackProbe: @Sendable () -> PlaybackObservation
     private var playbackMonitorTask: Task<Void, Never>?
     private var consecutiveUnavailableSamples = 0
@@ -144,10 +171,9 @@ final class MusicController: ObservableObject {
         return false
     }
 
-    /// MediaRemote can distinguish an explicit pause/stop from a momentary
-    /// owner-query failure. Core Audio is used only when that state is unknown,
-    /// keeping browser playback supported without treating arbitrary audio as
-    /// music.
+    /// Arc-hosted Spotify is read from its actual play/pause control because
+    /// MediaRemote can report a stale state for browser playback. Core Audio is
+    /// retained as a fallback for supported sources without reliable UI state.
     nonisolated static func detectPlaybackObservation() -> PlaybackObservation {
         let ownerBundleIdentifier = currentNowPlayingBundleIdentifier()
         if let ownerBundleIdentifier,
@@ -156,28 +182,55 @@ final class MusicController: ObservableObject {
         }
 
         if let ownerBundleIdentifier {
+            if isArcBundleIdentifier(ownerBundleIdentifier) {
+                switch arcSpotifyWebPlaybackState() {
+                case .playing:
+                    return .playing(ownerBundleIdentifier: ownerBundleIdentifier)
+                case .paused, .stopped, .interrupted:
+                    return .notPlaying(ownerBundleIdentifier: ownerBundleIdentifier)
+                case .unknown, .unavailable:
+                    break
+                }
+            }
+            let hasActiveOutput = hasActiveSupportedMediaAudio(
+                matchingNowPlayingOwner: ownerBundleIdentifier
+            )
             let state = PlaybackProbeState(
                 rawValue: JoiCurrentNowPlayingPlaybackState()
             ) ?? .unavailable
-            switch state {
-            case .playing:
-                return .playing(ownerBundleIdentifier: ownerBundleIdentifier)
-            case .paused, .stopped, .interrupted:
-                return .notPlaying(ownerBundleIdentifier: ownerBundleIdentifier)
-            case .unknown, .unavailable:
-                if hasActiveSupportedMediaAudio(
-                    matchingNowPlayingOwner: ownerBundleIdentifier
-                ) {
-                    return .playing(ownerBundleIdentifier: ownerBundleIdentifier)
-                }
-                return .unavailable(ownerBundleIdentifier: ownerBundleIdentifier)
-            }
+            return playbackObservation(
+                ownerBundleIdentifier: ownerBundleIdentifier,
+                state: state,
+                hasActiveOutput: hasActiveOutput
+            )
         }
 
         if hasActiveSupportedMediaAudio() {
             return .playing(ownerBundleIdentifier: nil)
         }
         return .unavailable(ownerBundleIdentifier: nil)
+    }
+
+    nonisolated static func playbackObservation(
+        ownerBundleIdentifier: String?,
+        state: PlaybackProbeState,
+        hasActiveOutput: Bool
+    ) -> PlaybackObservation {
+        if hasActiveOutput {
+            // Arc currently reports a paused-looking MediaRemote raw value while
+            // Spotify Web is audibly playing. A matching Core Audio output is the
+            // authoritative signal in that case; MediaRemote remains the fast
+            // stop/pause signal once output actually goes quiet.
+            return .playing(ownerBundleIdentifier: ownerBundleIdentifier)
+        }
+        switch state {
+        case .playing:
+            return .playing(ownerBundleIdentifier: ownerBundleIdentifier)
+        case .paused, .stopped, .interrupted:
+            return .notPlaying(ownerBundleIdentifier: ownerBundleIdentifier)
+        case .unknown, .unavailable:
+            return .unavailable(ownerBundleIdentifier: ownerBundleIdentifier)
+        }
     }
 
     /// Definitive player states win immediately. Only an unavailable sample gets
@@ -206,29 +259,45 @@ final class MusicController: ObservableObject {
                 lastMessage = "Start playback first, then Joi will control that source."
                 return false
             }
-            if session.hasActiveOutput {
-                lastValidatedOwnerBundleIdentifier = session.ownerBundleIdentifier
-            }
             pendingAction = action
             pendingOwnerBundleIdentifier = session.ownerBundleIdentifier
 
-            if let command = Self.nowPlayingCommand(for: action),
-               Self.commandSupport(for: command) != .unsupported,
-               JoiSendNowPlayingCommand(command.rawValue) {
-                permissionRequired = false
-                lastMessage = "Command sent to the current media session."
+            if Self.isArcBundleIdentifier(session.ownerBundleIdentifier),
+               performArcSpotify(action) {
+                pendingAction = nil
+                pendingOwnerBundleIdentifier = nil
+                automationPermissionRequired = false
+                lastMessage = message(for: action)
                 if action == .playPause {
                     optimisticallyTogglePlayback()
+                    schedulePlaybackRefresh()
                 }
                 return true
             }
 
-            guard Self.canUseMediaKeyFallback(
-                hasActiveOutput: session.hasActiveOutput,
-                matchesLastValidatedOwner: session.ownerBundleIdentifier
-                    == lastValidatedOwnerBundleIdentifier
-            ) else {
-                lastMessage = "Start playback once before using the media-key fallback."
+            if let target = currentNativePlayer(requirePlaying: false) {
+                let source = script(for: action, player: target)
+                if !source.isEmpty, executePlayerScript(source) {
+                    pendingAction = nil
+                    pendingOwnerBundleIdentifier = nil
+                    lastMessage = message(for: action)
+                    if action == .playPause {
+                        optimisticallyTogglePlayback()
+                        schedulePlaybackRefresh()
+                    }
+                    return true
+                }
+            }
+
+            // MediaRemote's private send function has no completion result and
+            // silently ignores browser commands on current macOS releases. Send
+            // the real system media key instead; it follows the same active Now
+            // Playing source used by the keyboard and Control Centre.
+            refreshAccessibilityPermissionWithoutRetry()
+            guard accessibilityGranted else {
+                permissionRequired = true
+                lastMessage = "Allow Joi in Accessibility once so its playback buttons can use macOS media keys."
+                requestAccessibilityPermission()
                 return false
             }
             return performFallback(mediaKey: mediaKey)
@@ -239,24 +308,20 @@ final class MusicController: ObservableObject {
             return false
         }
 
+        if Self.isArcBundleIdentifier(session.ownerBundleIdentifier) {
+            if performArcSpotify(action) {
+                automationPermissionRequired = false
+                lastMessage = message(for: action)
+                return true
+            }
+        }
+
         if action == .lyrics {
             guard let target = currentNativePlayer() else {
                 lastMessage = unavailableMessage(for: action)
                 return false
             }
             return openLyrics(for: target)
-        }
-
-        if Self.isArcBundleIdentifier(session.ownerBundleIdentifier) {
-            guard session.hasActiveOutput else {
-                lastMessage = "Spotify Web is not the active Arc media source."
-                return false
-            }
-            if performArcSpotify(action) {
-                automationPermissionRequired = false
-                lastMessage = message(for: action)
-                return true
-            }
         }
 
         if let target = currentNativePlayer(requirePlaying: false) {
@@ -286,15 +351,26 @@ final class MusicController: ObservableObject {
         return false
     }
 
-    /// App-specific scripting is deliberately limited to capabilities that do not
-    /// have a system media key. Transport controls never use this path because a
-    /// `tell application` command can launch or target the wrong player.
+    /// App-specific scripting is used only after the current Now Playing owner
+    /// has been validated, so it cannot launch or target an unrelated player.
     func script(for action: Action, player: Player) -> String {
         switch (player, action) {
+        case (.music, .previous):
+            return "tell application \"Music\" to previous track"
+        case (.music, .playPause):
+            return "tell application \"Music\" to playpause"
+        case (.music, .next):
+            return "tell application \"Music\" to next track"
         case (.music, .favorite):
             return "tell application \"Music\" to set favorited of current track to true"
         case (.music, .shuffle):
             return "tell application \"Music\" to set shuffle enabled to not shuffle enabled"
+        case (.spotify, .previous):
+            return "tell application \"Spotify\" to previous track"
+        case (.spotify, .playPause):
+            return "tell application \"Spotify\" to playpause"
+        case (.spotify, .next):
+            return "tell application \"Spotify\" to next track"
         case (.spotify, .shuffle):
             return "tell application \"Spotify\" to set shuffling to not shuffling"
         default:
@@ -438,10 +514,9 @@ final class MusicController: ObservableObject {
     }
 
     static func canUseMediaKeyFallback(
-        hasActiveOutput: Bool,
-        matchesLastValidatedOwner: Bool
+        hasRecognizedNowPlayingOwner: Bool
     ) -> Bool {
-        hasActiveOutput || matchesLastValidatedOwner
+        hasRecognizedNowPlayingOwner
     }
 
     /// Only apps that are expected to own a system Now Playing session may unlock
@@ -649,22 +724,27 @@ final class MusicController: ObservableObject {
 
     private struct MediaSession {
         let ownerBundleIdentifier: String
-        let hasActiveOutput: Bool
     }
 
     private var currentMediaSession: MediaSession? {
-        guard let ownerBundleIdentifier = Self.currentNowPlayingBundleIdentifier(),
-              Self.isSupportedMediaBundleIdentifier(ownerBundleIdentifier) else {
+        let liveOwner = Self.currentNowPlayingBundleIdentifier()
+        let ownerBundleIdentifier: String
+        if let liveOwner, Self.isSupportedMediaBundleIdentifier(liveOwner) {
+            ownerBundleIdentifier = liveOwner
+        } else if let lastKnownMediaOwnerBundleIdentifier,
+                  Self.isSupportedMediaBundleIdentifier(lastKnownMediaOwnerBundleIdentifier),
+                  Self.isRunning(bundleIdentifier: lastKnownMediaOwnerBundleIdentifier) {
+            ownerBundleIdentifier = lastKnownMediaOwnerBundleIdentifier
+        } else if Self.isRunning(bundleIdentifier: "company.thebrowser.Browser"),
+                  Self.arcSpotifyWebPlaybackState() != .unavailable {
+            // Now Playing temporarily drops its owner during browser track
+            // handoffs. One unambiguous Spotify Web tab is enough to keep rapid
+            // Previous/Next/Play interactions attached to the same source.
+            ownerBundleIdentifier = "company.thebrowser.Browser"
+        } else {
             return nil
         }
-        return MediaSession(
-            ownerBundleIdentifier: ownerBundleIdentifier,
-            hasActiveOutput: Self.canControlTransport(
-                activeSupportedMediaAudio: Self.hasActiveSupportedMediaAudio(
-                    matchingNowPlayingOwner: ownerBundleIdentifier
-                )
-            )
-        )
+        return MediaSession(ownerBundleIdentifier: ownerBundleIdentifier)
     }
 
     nonisolated static func currentNowPlayingBundleIdentifier() -> String? {
@@ -673,6 +753,12 @@ final class MusicController: ObservableObject {
         return NSRunningApplication(
             processIdentifier: processIdentifier
         )?.bundleIdentifier
+    }
+
+    nonisolated private static func isRunning(bundleIdentifier: String) -> Bool {
+        !NSRunningApplication.runningApplications(
+            withBundleIdentifier: bundleIdentifier
+        ).isEmpty
     }
 
     nonisolated private static let supportedMediaBundleIdentifierPrefixes = [
@@ -712,7 +798,7 @@ final class MusicController: ObservableObject {
         }
     }
 
-    private static func isArcBundleIdentifier(_ bundleIdentifier: String) -> Bool {
+    nonisolated private static func isArcBundleIdentifier(_ bundleIdentifier: String) -> Bool {
         let identifier = bundleIdentifier.lowercased()
         return identifier == "company.thebrowser.browser"
             || identifier.hasPrefix("company.thebrowser.browser.")
@@ -787,26 +873,33 @@ final class MusicController: ObservableObject {
 
     static func arcSpotifyJavaScript(for action: Action) -> String? {
         switch action {
+        case .previous:
+            return clickSpotifyControlJavaScript(
+                testID: "control-button-skip-back",
+                labelPattern: "previous|skip back",
+                result: "previous"
+            )
+        case .playPause:
+            return clickSpotifyControlJavaScript(
+                testID: "control-button-playpause",
+                labelPattern: "play|pause",
+                result: "playPause"
+            )
+        case .next:
+            return clickSpotifyControlJavaScript(
+                testID: "control-button-skip-forward",
+                labelPattern: "next|skip forward",
+                result: "next"
+            )
         case .shuffle:
-            return """
-            (() => {
-              const ownsPlayback = navigator.mediaSession?.playbackState === 'playing'
-                || [...document.querySelectorAll('audio, video')]
-                  .some((media) => !media.paused && !media.ended);
-              if (!ownsPlayback) return 'not_playing';
-              const button = document.querySelector('[data-testid="control-button-shuffle"]');
-              if (!(button instanceof HTMLButtonElement) || button.disabled) return 'not_found';
-              button.click();
-              return 'clicked:shuffle';
-            })()
-            """
+            return clickSpotifyControlJavaScript(
+                testID: "control-button-shuffle",
+                labelPattern: "shuffle",
+                result: "shuffle"
+            )
         case .favorite:
             return """
             (() => {
-              const ownsPlayback = navigator.mediaSession?.playbackState === 'playing'
-                || [...document.querySelectorAll('audio, video')]
-                  .some((media) => !media.paused && !media.ended);
-              if (!ownsPlayback) return 'not_playing';
               const root = document.querySelector('[data-testid="now-playing-widget"]')
                 || document.querySelector('[data-testid="now-playing-bar"]');
               if (!root) return 'not_found';
@@ -821,9 +914,33 @@ final class MusicController: ObservableObject {
               return 'clicked:favorite';
             })()
             """
-        case .previous, .playPause, .next, .lyrics:
-            return nil
+        case .lyrics:
+            return clickSpotifyControlJavaScript(
+                testID: "lyrics-button",
+                labelPattern: "lyrics",
+                result: "lyrics"
+            )
         }
+    }
+
+    private static func clickSpotifyControlJavaScript(
+        testID: String,
+        labelPattern: String,
+        result: String
+    ) -> String {
+        """
+        (() => {
+          const byTestID = document.querySelector('[data-testid="\(testID)"]');
+          const byLabel = [...document.querySelectorAll('button')].find((candidate) => {
+            const label = candidate.getAttribute('aria-label') || '';
+            return /\(labelPattern)/i.test(label);
+          });
+          const button = byTestID || byLabel;
+          if (!(button instanceof HTMLButtonElement) || button.disabled) return 'not_found';
+          button.click();
+          return 'clicked:\(result)';
+        })()
+        """
     }
 
     static func arcSpotifyAppleScript(for action: Action) -> String? {
@@ -831,77 +948,91 @@ final class MusicController: ObservableObject {
             return nil
         }
         let encoded = Data(javaScript.utf8).base64EncodedString()
-        let playbackProbe = """
-        (() => {
-          const playing = navigator.mediaSession?.playbackState === 'playing'
-            || [...document.querySelectorAll('audio, video')]
-              .some((media) => !media.paused && !media.ended && !media.muted);
-          return playing ? 'playing' : 'idle';
-        })()
-        """
-        let encodedProbe = Data(playbackProbe.utf8).base64EncodedString()
         return """
-        set activeTabCount to 0
-        set spotifyPlayingCount to 0
+        set spotifyTabCount to 0
         tell application id "company.thebrowser.Browser"
             repeat with browserWindow in windows
-                repeat with browserTab in tabs of browserWindow
-                    set tabURL to URL of browserTab
-                    try
-                        set tabState to execute browserTab javascript "eval(atob('\(encodedProbe)'))"
-                        if tabState is "playing" then
-                            set activeTabCount to activeTabCount + 1
-                            if tabURL starts with "https://open.spotify.com/" then
-                                set spotifyPlayingCount to spotifyPlayingCount + 1
-                            end if
-                        end if
-                    on error errorMessage number errorNumber
-                        if errorNumber is -1743 then
-                            return "error:" & errorNumber & ":" & errorMessage
-                        end if
-                        if tabURL starts with "https://open.spotify.com/" then
-                            return "error:" & errorNumber & ":" & errorMessage
-                        end if
-                    end try
-                end repeat
+                set spotifyTabs to every tab of browserWindow whose URL starts with "https://open.spotify.com/"
+                set spotifyTabCount to spotifyTabCount + (count of spotifyTabs)
             end repeat
-            if activeTabCount is not 1 or spotifyPlayingCount is not 1 then
+            if spotifyTabCount is not 1 then
                 return "ambiguous_owner"
             end if
             repeat with browserWindow in windows
-                repeat with browserTab in tabs of browserWindow
-                    set tabURL to URL of browserTab
-                    if tabURL starts with "https://open.spotify.com/" then
-                        try
-                            set tabState to execute browserTab javascript "eval(atob('\(encodedProbe)'))"
-                            if tabState is "playing" then
-                                set jsResult to execute browserTab javascript "eval(atob('\(encoded)'))"
-                                if jsResult starts with "clicked:" then return jsResult
-                            end if
-                        on error errorMessage number errorNumber
-                            return "error:" & errorNumber & ":" & errorMessage
-                        end try
-                    end if
-                end repeat
+                set spotifyTabs to every tab of browserWindow whose URL starts with "https://open.spotify.com/"
+                if (count of spotifyTabs) is 1 then
+                    try
+                        set jsResult to execute (first tab of browserWindow whose URL starts with "https://open.spotify.com/") javascript "eval(atob('\(encoded)'))"
+                        if jsResult starts with "clicked:" then return jsResult
+                        return jsResult
+                    on error errorMessage number errorNumber
+                        return "error:" & errorNumber & ":" & errorMessage
+                    end try
+                end if
             end repeat
         end tell
         return "not_found"
         """
     }
 
+    nonisolated static func arcSpotifyWebPlaybackState() -> PlaybackProbeState {
+        let javaScript = """
+        (() => {
+          const button = document.querySelector('[data-testid="control-button-playpause"]');
+          if (!(button instanceof HTMLButtonElement)) return 'unavailable';
+          const label = button.getAttribute('aria-label') || '';
+          if (/pause/i.test(label)) return 'playing';
+          if (/play/i.test(label)) return 'paused';
+          return 'unavailable';
+        })()
+        """
+        let encoded = Data(javaScript.utf8).base64EncodedString()
+        let source = """
+        set spotifyTabCount to 0
+        set webPlaybackState to "unavailable"
+        tell application id "company.thebrowser.Browser"
+            repeat with browserWindow in windows
+                set spotifyTabs to every tab of browserWindow whose URL starts with "https://open.spotify.com/"
+                set spotifyTabCount to spotifyTabCount + (count of spotifyTabs)
+            end repeat
+            if spotifyTabCount is not 1 then return "unavailable"
+            repeat with browserWindow in windows
+                set spotifyTabs to every tab of browserWindow whose URL starts with "https://open.spotify.com/"
+                if (count of spotifyTabs) is 1 then
+                    try
+                        set webPlaybackState to execute (first tab of browserWindow whose URL starts with "https://open.spotify.com/") javascript "eval(atob('\(encoded)'))"
+                    on error
+                        set webPlaybackState to "unavailable"
+                    end try
+                end if
+            end repeat
+        end tell
+        return webPlaybackState
+        """
+        switch normalizeArcResult(
+            arcAppleScriptExecutor.execute(key: "playback-state", source: source)
+        ) {
+        case "playing": return .playing
+        case "paused": return .paused
+        default: return .unavailable
+        }
+    }
+
+    nonisolated static func normalizeArcResult(_ rawResult: String?) -> String? {
+        rawResult?.trimmingCharacters(
+            in: CharacterSet(charactersIn: "\" \n\r\t")
+        )
+    }
+
     private func performArcSpotify(_ action: Action) -> Bool {
         guard let source = Self.arcSpotifyAppleScript(for: action) else {
             return false
         }
-        var error: NSDictionary?
-        let result = NSAppleScript(source: source)?.executeAndReturnError(&error).stringValue
-        if let error {
-            let number = error[NSAppleScript.errorNumber] as? Int
-            automationPermissionRequired = number == -1_743
-            lastMessage = error[NSAppleScript.errorMessage] as? String
-                ?? "Arc did not allow this control."
-            return false
-        }
+        let rawResult = arcAppleScriptExecutor.execute(
+            key: "command-\(action.rawValue)",
+            source: source
+        )
+        let result = Self.normalizeArcResult(rawResult)
         if let result, result.hasPrefix("error:") {
             automationPermissionRequired = result.hasPrefix("error:-1743:")
             lastMessage = "Arc did not allow this control."
@@ -918,6 +1049,20 @@ final class MusicController: ObservableObject {
         !NSRunningApplication.runningApplications(withBundleIdentifier: player.bundleIdentifier).isEmpty
     }
 
+    private func executePlayerScript(_ source: String) -> Bool {
+        var error: NSDictionary?
+        NSAppleScript(source: source)?.executeAndReturnError(&error)
+        if let error {
+            let number = error[NSAppleScript.errorNumber] as? Int
+            automationPermissionRequired = number == -1_743
+            lastMessage = error[NSAppleScript.errorMessage] as? String
+                ?? "Music control failed."
+            return false
+        }
+        automationPermissionRequired = false
+        return true
+    }
+
     private func startPlaybackMonitor() {
         playbackMonitorTask?.cancel()
         let probe = playbackProbe
@@ -929,7 +1074,7 @@ final class MusicController: ObservableObject {
                 guard !Task.isCancelled, self != nil else { return }
                 self?.setPlaybackState(detected)
                 do {
-                    try await Task.sleep(for: .milliseconds(250))
+                    try await Task.sleep(for: .milliseconds(350))
                 } catch {
                     return
                 }
@@ -938,6 +1083,15 @@ final class MusicController: ObservableObject {
     }
 
     private func setPlaybackState(_ observation: PlaybackObservation) {
+        switch observation {
+        case let .playing(ownerBundleIdentifier),
+             let .notPlaying(ownerBundleIdentifier),
+             let .unavailable(ownerBundleIdentifier):
+            if let ownerBundleIdentifier,
+               Self.isSupportedMediaBundleIdentifier(ownerBundleIdentifier) {
+                lastKnownMediaOwnerBundleIdentifier = ownerBundleIdentifier
+            }
+        }
         let transition = Self.playbackTransition(
             current: isPlaying,
             consecutiveUnavailableSamples: consecutiveUnavailableSamples,
@@ -952,6 +1106,14 @@ final class MusicController: ObservableObject {
     private func optimisticallyTogglePlayback() {
         consecutiveUnavailableSamples = 0
         isPlaying.toggle()
+    }
+
+    private func schedulePlaybackRefresh() {
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            self?.refreshPlaybackState()
+        }
     }
 
     private func isPlaying(_ player: Player) -> Bool {

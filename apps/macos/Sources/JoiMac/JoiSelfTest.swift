@@ -326,18 +326,12 @@ enum JoiSelfTest {
         )
         check(
             MusicController.canUseMediaKeyFallback(
-                hasActiveOutput: true,
-                matchesLastValidatedOwner: false
+                hasRecognizedNowPlayingOwner: true
             )
-                && MusicController.canUseMediaKeyFallback(
-                    hasActiveOutput: false,
-                    matchesLastValidatedOwner: true
-                )
                 && !MusicController.canUseMediaKeyFallback(
-                    hasActiveOutput: false,
-                    matchesLastValidatedOwner: false
+                    hasRecognizedNowPlayingOwner: false
                 ),
-            "paused media can resume only for the last validated owner",
+            "recognized paused media remains controllable through the system media key",
             failures: &failures
         )
         check(
@@ -416,6 +410,20 @@ enum JoiSelfTest {
             observation: .unavailable(ownerBundleIdentifier: nil)
         )
         check(
+            MusicController.playbackObservation(
+                ownerBundleIdentifier: "company.thebrowser.Browser",
+                state: .paused,
+                hasActiveOutput: true
+            ) == .playing(ownerBundleIdentifier: "company.thebrowser.Browser")
+                && MusicController.playbackObservation(
+                    ownerBundleIdentifier: "company.thebrowser.Browser",
+                    state: .paused,
+                    hasActiveOutput: false
+                ) == .notPlaying(ownerBundleIdentifier: "company.thebrowser.Browser"),
+            "matching browser audio overrides a stale paused-looking Now Playing value",
+            failures: &failures
+        )
+        check(
             MusicController.playbackTransition(
                 current: false,
                 consecutiveUnavailableSamples: 0,
@@ -441,22 +449,37 @@ enum JoiSelfTest {
             "injected playback probe publishes the playing state",
             failures: &failures
         )
-        check(music.script(for: .next, player: .music).isEmpty, "transport controls cannot launch a named player", failures: &failures)
+        check(
+            music.script(for: .next, player: .music)
+                == "tell application \"Music\" to next track"
+                && music.script(for: .playPause, player: .spotify)
+                    == "tell application \"Spotify\" to playpause",
+            "native transport scripts target only the validated Now Playing owner",
+            failures: &failures
+        )
         check(music.script(for: .shuffle, player: .spotify) == "tell application \"Spotify\" to set shuffling to not shuffling", "Spotify command", failures: &failures)
         check(music.script(for: .favorite, player: .spotify).isEmpty, "Spotify read-only favorite is not misrepresented", failures: &failures)
         check(
             MusicController.arcSpotifyJavaScript(for: .shuffle)?.contains("control-button-shuffle") == true
                 && MusicController.arcSpotifyJavaScript(for: .favorite)?.contains("now-playing-widget") == true
                 && MusicController.arcSpotifyJavaScript(for: .favorite)?.contains("add-button") == true
-                && MusicController.arcSpotifyJavaScript(for: .favorite)?.contains("playbackState === 'playing'") == true
+                && MusicController.arcSpotifyJavaScript(for: .playPause)?.contains("control-button-playpause") == true
+                && MusicController.arcSpotifyJavaScript(for: .next)?.contains("control-button-skip-forward") == true
+                && MusicController.arcSpotifyJavaScript(for: .lyrics)?.contains("lyrics-button") == true
                 && MusicController.arcSpotifyAppleScript(for: .favorite)?.contains(
                     "on error errorMessage number errorNumber"
                 ) == true
                 && MusicController.arcSpotifyAppleScript(for: .favorite)?.contains(
-                    "activeTabCount is not 1 or spotifyPlayingCount is not 1"
-                ) == true
-                && MusicController.arcSpotifyJavaScript(for: .playPause) == nil,
-            "Arc Spotify integration requires unambiguous active playback and explicit feature controls",
+                    "spotifyTabCount is not 1"
+                ) == true,
+            "Arc Spotify integration targets one explicit Web Player tab across all controls",
+            failures: &failures
+        )
+        check(
+            MusicController.normalizeArcResult("\"clicked:playPause\"")
+                == "clicked:playPause"
+                && MusicController.normalizeArcResult(" paused ") == "paused",
+            "Arc JavaScript results are normalized before command and playback decisions",
             failures: &failures
         )
         var arcScriptCompileError: NSDictionary?

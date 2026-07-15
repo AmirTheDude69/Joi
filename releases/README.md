@@ -1,5 +1,13 @@
 # Joi macOS installers
 
+## Joi 0.7.1
+
+- File: `Joi-0.7.1-macOS-Universal.dmg`
+- macOS: 14 or later
+- Architectures: Apple Silicon and Intel
+- SHA-256: `a3d1c4f63421e1c3a6eeb72477c5c15d6d0daf2a1654af1f6187419a946e519d`
+- Highlights: live-verified Spotify Web controls in Arc, correct state-driven Play/Pause icon, direct Previous/Next/Shuffle/Favorite/Lyrics actions, and a dance heartbeat that keeps Joi moving throughout playback and stops promptly when paused.
+
 ## Joi 0.7.0
 
 - File: `Joi-0.7.0-macOS-Universal.dmg`

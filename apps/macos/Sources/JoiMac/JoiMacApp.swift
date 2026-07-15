@@ -16,7 +16,7 @@ struct JoiMacApp: App {
 
 @MainActor
 final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
-    let model = AppModel()
+    lazy var model = AppModel()
 
     private var companionPanel: CompanionPanel?
     private var settingsWindow: NSWindow?

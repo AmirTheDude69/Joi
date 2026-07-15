@@ -122,12 +122,7 @@ int32_t JoiCurrentNowPlayingProcessIdentifier(void) {
     return waitResult == 0 && result > 0 ? (int32_t)result : 0;
 }
 
-int32_t JoiCurrentNowPlayingPlaybackState(void) {
-    int32_t modernState = JoiModernNowPlayingPlaybackState();
-    if (modernState != JoiNowPlayingPlaybackStateUnavailable) {
-        return modernState;
-    }
-
+static int32_t JoiLegacyNowPlayingPlaybackState(void) {
     static JoiGetNowPlayingPlaybackStateFunction function;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -161,6 +156,14 @@ int32_t JoiCurrentNowPlayingPlaybackState(void) {
         dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC)
     );
     return waitResult == 0 ? result : JoiNowPlayingPlaybackStateUnavailable;
+}
+
+int32_t JoiCurrentNowPlayingPlaybackState(void) {
+    int32_t modernState = JoiModernNowPlayingPlaybackState();
+    if (modernState != JoiNowPlayingPlaybackStateUnavailable) {
+        return modernState;
+    }
+    return JoiLegacyNowPlayingPlaybackState();
 }
 
 bool JoiSendNowPlayingCommand(int32_t command) {
