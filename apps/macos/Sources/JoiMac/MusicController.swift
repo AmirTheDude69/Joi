@@ -41,6 +41,13 @@ final class MusicController: ObservableObject {
         case supported
     }
 
+    struct MediaProcessAudioSample: Equatable {
+        let bundleIdentifier: String
+        let isRunningOutput: Bool
+        let isRunningInput: Bool
+        let isInputStateKnown: Bool
+    }
+
     enum Player: CaseIterable, Equatable {
         case spotify
         case music
@@ -65,6 +72,7 @@ final class MusicController: ObservableObject {
     @Published private(set) var permissionRequired = false
     @Published private(set) var showsFallbackOption = false
     @Published private(set) var automationPermissionRequired = false
+    @Published private(set) var isPlaying = false
 
     static let accessibilitySettingsURL = URL(
         string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
@@ -76,9 +84,54 @@ final class MusicController: ObservableObject {
     private var pendingAction: Action?
     private var pendingOwnerBundleIdentifier: String?
     private var lastValidatedOwnerBundleIdentifier: String?
+    private let playbackProbe: @Sendable () -> Bool
+    private var playbackMonitorTask: Task<Void, Never>?
+    private var consecutivePlaybackMisses = 0
 
-    init() {
+    init(
+        playbackProbe: @escaping @Sendable () -> Bool = {
+            MusicController.detectActivePlayback()
+        },
+        monitorPlayback: Bool = true
+    ) {
+        self.playbackProbe = playbackProbe
         refreshAccessibilityPermission()
+        if monitorPlayback {
+            startPlaybackMonitor()
+        }
+    }
+
+    deinit {
+        playbackMonitorTask?.cancel()
+    }
+
+    /// A synchronous hook keeps the playback detector independently testable.
+    /// Production polling runs the same probe off the main actor.
+    func refreshPlaybackState() {
+        setPlaybackState(playbackProbe())
+    }
+
+    nonisolated static func detectActivePlayback() -> Bool {
+        if let owner = currentNowPlayingBundleIdentifier(),
+           isSupportedMediaBundleIdentifier(owner) {
+            return hasActiveSupportedMediaAudio(matchingNowPlayingOwner: owner)
+        }
+        return hasActiveSupportedMediaAudio()
+    }
+
+    /// A short stop hysteresis keeps the dance continuous across ordinary track
+    /// transitions while still starting immediately on the first playing sample.
+    nonisolated static func playbackTransition(
+        current: Bool,
+        consecutiveMisses: Int,
+        detected: Bool
+    ) -> (isPlaying: Bool, misses: Int) {
+        if detected {
+            return (true, 0)
+        }
+        guard current else { return (false, 0) }
+        let misses = consecutiveMisses + 1
+        return misses >= 2 ? (false, 0) : (true, misses)
     }
 
     @discardableResult
@@ -327,14 +380,14 @@ final class MusicController: ObservableObject {
     /// Only apps that are expected to own a system Now Playing session may unlock
     /// transport keys. This deliberately excludes calls, games, system sounds, and
     /// arbitrary background audio that could otherwise make a Play key wake Music.
-    static func isSupportedMediaBundleIdentifier(_ bundleIdentifier: String) -> Bool {
+    nonisolated static func isSupportedMediaBundleIdentifier(_ bundleIdentifier: String) -> Bool {
         let identifier = bundleIdentifier.lowercased()
         return supportedMediaBundleIdentifierPrefixes.contains { prefix in
             identifier == prefix || identifier.hasPrefix(prefix + ".")
         }
     }
 
-    static func isEligibleMediaOutput(
+    nonisolated static func isEligibleMediaOutput(
         bundleIdentifier: String,
         isRunningOutput: Bool,
         isRunningInput: Bool,
@@ -356,10 +409,54 @@ final class MusicController: ObservableObject {
         return !isBrowserBundleIdentifier(bundleIdentifier) || !isRunningInput
     }
 
+    nonisolated static func hasEligibleMediaPlayback(
+        samples: [MediaProcessAudioSample],
+        nowPlayingOwnerBundleIdentifier: String? = nil
+    ) -> Bool {
+        struct FamilyActivity {
+            var hasOutput = false
+            var hasInput = false
+            var hasUnknownInput = false
+            var isBrowser = false
+        }
+
+        let requiredFamily: String?
+        if let nowPlayingOwnerBundleIdentifier {
+            guard let family = mediaFamilyPrefix(for: nowPlayingOwnerBundleIdentifier) else {
+                return false
+            }
+            requiredFamily = family
+        } else {
+            requiredFamily = nil
+        }
+
+        var families: [String: FamilyActivity] = [:]
+        for sample in samples {
+            guard let family = mediaFamilyPrefix(for: sample.bundleIdentifier),
+                  requiredFamily == nil || family == requiredFamily else {
+                continue
+            }
+            var activity = families[family] ?? FamilyActivity()
+            activity.hasOutput = activity.hasOutput || sample.isRunningOutput
+            activity.hasInput = activity.hasInput || sample.isRunningInput
+            let browser = isBrowserBundleIdentifier(sample.bundleIdentifier)
+            activity.isBrowser = activity.isBrowser || browser
+            activity.hasUnknownInput = activity.hasUnknownInput
+                || (browser && !sample.isInputStateKnown)
+            families[family] = activity
+        }
+
+        return families.values.contains { activity in
+            activity.hasOutput
+                && (!activity.isBrowser
+                    || (!activity.hasInput && !activity.hasUnknownInput))
+        }
+    }
+
     /// Core Audio exposes the actual processes producing output on macOS 14+.
     /// Requiring both active output and a recognized media/browser bundle keeps
     /// transport controls attached to what is already playing.
-    static func hasActiveSupportedMediaAudio(
+    nonisolated static func hasActiveSupportedMediaAudio(
         matchingNowPlayingOwner ownerBundleIdentifier: String? = nil,
         excludingProcessIdentifier excludedPID: pid_t = ProcessInfo.processInfo.processIdentifier
     ) -> Bool {
@@ -391,6 +488,7 @@ final class MusicController: ObservableObject {
         }
         guard listStatus == noErr else { return false }
 
+        var samples: [MediaProcessAudioSample] = []
         for processObject in processObjects where processObject != kAudioObjectUnknown {
             var pidAddress = AudioObjectPropertyAddress(
                 mSelector: kAudioProcessPropertyPID,
@@ -444,22 +542,17 @@ final class MusicController: ObservableObject {
                 &inputSize,
                 &isRunningInput
             )
-            // Browser input state is part of the call-safety gate. If Core Audio
-            // cannot provide it, do not guess that the browser is safe.
-            if Self.isBrowserBundleIdentifier(bundleIdentifier), inputStatus != noErr {
-                continue
-            }
-
-            if isEligibleMediaOutput(
+            samples.append(MediaProcessAudioSample(
                 bundleIdentifier: bundleIdentifier,
                 isRunningOutput: isRunningOutput != 0,
                 isRunningInput: isRunningInput != 0,
-                nowPlayingOwnerBundleIdentifier: ownerBundleIdentifier
-            ) {
-                return true
-            }
+                isInputStateKnown: inputStatus == noErr
+            ))
         }
-        return false
+        return hasEligibleMediaPlayback(
+            samples: samples,
+            nowPlayingOwnerBundleIdentifier: ownerBundleIdentifier
+        )
     }
 
     @discardableResult
@@ -507,7 +600,7 @@ final class MusicController: ObservableObject {
         )
     }
 
-    static func currentNowPlayingBundleIdentifier() -> String? {
+    nonisolated static func currentNowPlayingBundleIdentifier() -> String? {
         let processIdentifier = JoiCurrentNowPlayingProcessIdentifier()
         guard processIdentifier > 0 else { return nil }
         return NSRunningApplication(
@@ -515,7 +608,7 @@ final class MusicController: ObservableObject {
         )?.bundleIdentifier
     }
 
-    private static let supportedMediaBundleIdentifierPrefixes = [
+    nonisolated private static let supportedMediaBundleIdentifierPrefixes = [
         "company.thebrowser.browser", // Arc
         "com.apple.music",
         "com.apple.podcasts",
@@ -534,7 +627,7 @@ final class MusicController: ObservableObject {
         "org.videolan.vlc",
     ]
 
-    private static let browserBundleIdentifierPrefixes = [
+    nonisolated private static let browserBundleIdentifierPrefixes = [
         "company.thebrowser.browser",
         "com.apple.safari",
         "com.brave.browser",
@@ -545,7 +638,7 @@ final class MusicController: ObservableObject {
         "org.mozilla.firefox",
     ]
 
-    private static func isBrowserBundleIdentifier(_ bundleIdentifier: String) -> Bool {
+    nonisolated private static func isBrowserBundleIdentifier(_ bundleIdentifier: String) -> Bool {
         let identifier = bundleIdentifier.lowercased()
         return browserBundleIdentifierPrefixes.contains { prefix in
             identifier == prefix || identifier.hasPrefix(prefix + ".")
@@ -558,7 +651,7 @@ final class MusicController: ObservableObject {
             || identifier.hasPrefix("company.thebrowser.browser.")
     }
 
-    private static func bundleIdentifiersShareMediaFamily(
+    nonisolated private static func bundleIdentifiersShareMediaFamily(
         _ first: String,
         _ second: String
     ) -> Bool {
@@ -569,14 +662,14 @@ final class MusicController: ObservableObject {
         return firstFamily == secondFamily
     }
 
-    private static func mediaFamilyPrefix(for bundleIdentifier: String) -> String? {
+    nonisolated private static func mediaFamilyPrefix(for bundleIdentifier: String) -> String? {
         let identifier = bundleIdentifier.lowercased()
         return supportedMediaBundleIdentifierPrefixes.first { prefix in
             identifier == prefix || identifier.hasPrefix(prefix + ".")
         }
     }
 
-    private static func bundleIdentifier(
+    nonisolated private static func bundleIdentifier(
         for processObject: AudioObjectID,
         processIdentifier: pid_t
     ) -> String? {
@@ -756,6 +849,36 @@ final class MusicController: ObservableObject {
 
     private func isRunning(_ player: Player) -> Bool {
         !NSRunningApplication.runningApplications(withBundleIdentifier: player.bundleIdentifier).isEmpty
+    }
+
+    private func startPlaybackMonitor() {
+        playbackMonitorTask?.cancel()
+        let probe = playbackProbe
+        playbackMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let detected = await Task.detached(priority: .utility) {
+                    probe()
+                }.value
+                guard !Task.isCancelled, self != nil else { return }
+                self?.setPlaybackState(detected)
+                do {
+                    try await Task.sleep(for: .seconds(1.25))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func setPlaybackState(_ detected: Bool) {
+        let transition = Self.playbackTransition(
+            current: isPlaying,
+            consecutiveMisses: consecutivePlaybackMisses,
+            detected: detected
+        )
+        consecutivePlaybackMisses = transition.misses
+        guard isPlaying != transition.isPlaying else { return }
+        isPlaying = transition.isPlaying
     }
 
     private func isPlaying(_ player: Player) -> Bool {

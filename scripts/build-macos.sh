@@ -39,6 +39,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$DIST/dmg-staging"
 /usr/bin/lipo -create "$ARM_BINARY" "$X86_BINARY" -output "$APP/Contents/MacOS/Joi"
 cp "$MACOS_ROOT/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/spritesheet.webp" "$APP/Contents/Resources/spritesheet.webp"
+cp "$MACOS_ROOT/Resources/JoiDance"/joi-dance-*.png "$APP/Contents/Resources/"
 
 python3 "$ROOT/scripts/make-macos-icon.py" \
     "$ROOT/spritesheet.webp" \

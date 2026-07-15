@@ -15,6 +15,7 @@ final class AvatarMotionController: ObservableObject {
     private var ambientTask: Task<Void, Never>?
     private var ambientIndex = 0
     private var contextIndex = 0
+    private var musicIsPlaying = false
     private var userReducedMotion = false
     private var systemReducedMotion = false
 
@@ -34,6 +35,7 @@ final class AvatarMotionController: ObservableObject {
             && transientToken == nil
             && animation == .idle
             && !isAnimating
+            && !musicIsPlaying
     }
 
     var isReducedMotionEnabled: Bool {
@@ -59,8 +61,7 @@ final class AvatarMotionController: ObservableObject {
         cancelTransient()
         cancelContext()
         guard let animation else {
-            self.animation = .idle
-            isAnimating = false
+            applyRestingState()
             return
         }
         if isReducedMotionEnabled {
@@ -92,9 +93,22 @@ final class AvatarMotionController: ObservableObject {
             guard !Task.isCancelled, self.transientToken == token else { return }
             self.transientToken = nil
             self.transientTask = nil
-            self.animation = self.contextAnimation ?? .idle
-            self.isAnimating = false
+            if let contextAnimation = self.contextAnimation {
+                self.animation = contextAnimation
+                self.isAnimating = false
+            } else {
+                self.applyRestingState()
+            }
         }
+    }
+
+    /// Music is a low-priority ambient state: explicit app actions and
+    /// persistent voice/focus/search contexts always remain authoritative.
+    func setMusicPlaying(_ playing: Bool) {
+        guard musicIsPlaying != playing else { return }
+        musicIsPlaying = playing
+        guard contextAnimation == nil, transientToken == nil else { return }
+        applyRestingState()
     }
 
     private func startContextLoop(_ context: SpriteAnimation) {
@@ -133,7 +147,7 @@ final class AvatarMotionController: ObservableObject {
             [.review, .waiting]
         case .failed:
             [.failed]
-        case .idle, .runningRight, .runningLeft, .jumping:
+        case .idle, .runningRight, .runningLeft, .jumping, .dancing:
             [context]
         }
     }
@@ -150,7 +164,7 @@ final class AvatarMotionController: ObservableObject {
             Double.random(in: 4.0 ... 6.5)
         case .failed:
             Double.random(in: 6.0 ... 9.0)
-        case .idle, .runningRight, .runningLeft, .jumping:
+        case .idle, .runningRight, .runningLeft, .jumping, .dancing:
             Double.random(in: 3.0 ... 5.0)
         }
     }
@@ -166,8 +180,7 @@ final class AvatarMotionController: ObservableObject {
                 startContextLoop(contextAnimation)
             }
         } else {
-            animation = .idle
-            isAnimating = false
+            applyRestingState()
         }
     }
 
@@ -189,11 +202,17 @@ final class AvatarMotionController: ObservableObject {
             guard !Task.isCancelled,
                   contextAnimation == nil,
                   transientToken == nil,
-                  !isReducedMotionEnabled
+                  !isReducedMotionEnabled,
+                  !musicIsPlaying
             else { continue }
             let next = ambientSequence[ambientIndex % ambientSequence.count]
             ambientIndex += 1
             play(next)
         }
+    }
+
+    private func applyRestingState() {
+        animation = musicIsPlaying ? .dancing : .idle
+        isAnimating = musicIsPlaying && !isReducedMotionEnabled
     }
 }

@@ -11,8 +11,16 @@ enum SpriteAnimation: String, CaseIterable {
     case waiting
     case working
     case review
+    case dancing
 
-    var row: Int {
+    /// Codex v2 owns rows 0...8. Standalone-only animations intentionally live
+    /// in separate resources so the canonical pet atlas remains installable.
+    static let standardCases: [SpriteAnimation] = [
+        .idle, .runningRight, .runningLeft, .waving, .jumping,
+        .failed, .waiting, .working, .review,
+    ]
+
+    var atlasRow: Int? {
         switch self {
         case .idle: 0
         case .runningRight: 1
@@ -23,6 +31,7 @@ enum SpriteAnimation: String, CaseIterable {
         case .waiting: 6
         case .working: 7
         case .review: 8
+        case .dancing: nil
         }
     }
 
@@ -36,6 +45,7 @@ enum SpriteAnimation: String, CaseIterable {
         case .waiting: [0.15, 0.15, 0.15, 0.15, 0.15, 0.26]
         case .working: [0.12, 0.12, 0.12, 0.12, 0.12, 0.22]
         case .review: [0.15, 0.15, 0.15, 0.15, 0.15, 0.28]
+        case .dancing: [0.14, 0.14, 0.12, 0.14, 0.12, 0.16, 0.16, 0.18]
         }
     }
 
@@ -74,6 +84,14 @@ final class SpriteSheet {
     private var source: NSImage?
     private var cache: [String: NSImage] = [:]
 
+    func frame(animation: SpriteAnimation, column: Int) -> NSImage? {
+        if let row = animation.atlasRow {
+            return frame(row: row, column: column)
+        }
+        guard animation == .dancing else { return nil }
+        return standaloneFrame(prefix: "joi-dance", column: column)
+    }
+
     func frame(row: Int, column: Int) -> NSImage? {
         let key = "\(row)-\(column)"
         if let cached = cache[key] {
@@ -109,5 +127,35 @@ final class SpriteSheet {
         ].compactMap { $0 }
         source = candidates.lazy.compactMap(NSImage.init(contentsOf:)).first
         return source
+    }
+
+    private func standaloneFrame(prefix: String, column: Int) -> NSImage? {
+        let key = "standalone-\(prefix)-\(column)"
+        if let cached = cache[key] {
+            return cached
+        }
+
+        let resourceName = String(format: "%@-%02d", prefix, column)
+        let filename = "\(resourceName).png"
+        let workingDirectory = URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath,
+            isDirectory: true
+        )
+        let candidates = [
+            Bundle.main.url(forResource: resourceName, withExtension: "png"),
+            Bundle.main.resourceURL?.appendingPathComponent(filename),
+            workingDirectory
+                .appendingPathComponent("apps/macos/Resources/JoiDance")
+                .appendingPathComponent(filename),
+            workingDirectory
+                .appendingPathComponent("Resources/JoiDance")
+                .appendingPathComponent(filename),
+        ].compactMap { $0 }
+
+        guard let image = candidates.lazy.compactMap(NSImage.init(contentsOf:)).first else {
+            return nil
+        }
+        cache[key] = image
+        return image
     }
 }

@@ -1,5 +1,13 @@
 # Joi macOS installers
 
+## Joi 0.6.0
+
+- File: `Joi-0.6.0-macOS-Universal.dmg`
+- macOS: 14 or later
+- Architectures: Apple Silicon and Intel
+- SHA-256: `569a457b8bba4548003bcb2b933c95ba62693f4c6dc3b2401fc7f77410087e5c`
+- Highlights: a new eight-frame Joi dance loop that starts automatically for active music, current-player detection for native apps and supported browsers, browser-family call filtering, smooth stop hysteresis across track changes, preserved Focus/Voice/Search animation priority, and a static dance pose under Reduce Motion.
+
 ## Joi 0.5.0
 
 - File: `Joi-0.5.0-macOS-Universal.dmg`

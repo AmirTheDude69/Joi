@@ -177,14 +177,70 @@ enum JoiSelfTest {
             "magnetic hover preserves the supplied expanded hover boundary",
             failures: &failures
         )
-        check(SpriteAnimation.runningRight.row == 1 && SpriteAnimation.runningLeft.row == 2, "directional running rows", failures: &failures)
-        check(SpriteAnimation.allCases.map(\.row) == Array(0 ... 8), "all standard animation rows mapped", failures: &failures)
-        check(SpriteAnimation.allCases.map { $0.durations.count } == [7, 8, 8, 4, 5, 8, 6, 6, 6], "every populated standard frame is animated", failures: &failures)
+        check(
+            SpriteAnimation.runningRight.atlasRow == 1
+                && SpriteAnimation.runningLeft.atlasRow == 2,
+            "directional running rows",
+            failures: &failures
+        )
+        check(
+            SpriteAnimation.standardCases.compactMap(\.atlasRow) == Array(0 ... 8),
+            "all standard animation rows mapped",
+            failures: &failures
+        )
+        check(
+            SpriteAnimation.standardCases.map { $0.durations.count }
+                == [7, 8, 8, 4, 5, 8, 6, 6, 6]
+                && SpriteAnimation.dancing.atlasRow == nil
+                && SpriteAnimation.dancing.durations.count == 8,
+            "standard atlas and standalone dance frames are mapped",
+            failures: &failures
+        )
+        check(
+            (0 ..< 8).allSatisfy {
+                SpriteSheet.shared.frame(animation: .dancing, column: $0)?.size
+                    == SpriteSheet.cellSize
+            },
+            "all eight standalone dance frames resolve at pet cell size",
+            failures: &failures
+        )
+        let motion = AvatarMotionController()
+        motion.setMusicPlaying(true)
+        check(
+            motion.animation == .dancing && motion.isAnimating,
+            "active music starts the dance immediately",
+            failures: &failures
+        )
+        motion.setReducedMotion(true)
+        check(
+            motion.animation == .dancing && !motion.isAnimating,
+            "Reduce Motion holds a static dance pose",
+            failures: &failures
+        )
+        motion.setContext(.working)
+        check(
+            motion.animation == .working && !motion.isAnimating,
+            "Focus context overrides music while Reduce Motion is enabled",
+            failures: &failures
+        )
+        motion.setContext(nil)
+        check(
+            motion.animation == .dancing && !motion.isAnimating,
+            "dance resumes after an overriding context ends",
+            failures: &failures
+        )
+        motion.setReducedMotion(false)
+        motion.setMusicPlaying(false)
+        check(
+            motion.animation == .idle && !motion.isAnimating,
+            "stopped music returns Joi to idle",
+            failures: &failures
+        )
         check(SpriteLookDirection.toward(pointer: CGPoint(x: 250, y: 150), from: center)?.index == 0, "gaze points up", failures: &failures)
         check(SpriteLookDirection.toward(pointer: CGPoint(x: 350, y: 250), from: center)?.index == 4, "gaze points right", failures: &failures)
         check(timer.remainingProgress == 1, "Pomodoro progress resets", failures: &failures)
 
-        let music = MusicController()
+        let music = MusicController(monitorPlayback: false)
         _ = MusicController.hasActiveSupportedMediaAudio()
         _ = MusicController.currentNowPlayingBundleIdentifier()
         check(
@@ -287,6 +343,67 @@ enum JoiSelfTest {
                     nowPlayingOwnerBundleIdentifier: "com.apple.Music"
                 ),
             "transport output must match the real Now Playing owner",
+            failures: &failures
+        )
+        let arcCallSamples = [
+            MusicController.MediaProcessAudioSample(
+                bundleIdentifier: "company.thebrowser.Browser.helper.renderer",
+                isRunningOutput: true,
+                isRunningInput: false,
+                isInputStateKnown: true
+            ),
+            MusicController.MediaProcessAudioSample(
+                bundleIdentifier: "company.thebrowser.Browser",
+                isRunningOutput: false,
+                isRunningInput: true,
+                isInputStateKnown: true
+            ),
+        ]
+        check(
+            !MusicController.hasEligibleMediaPlayback(
+                samples: arcCallSamples,
+                nowPlayingOwnerBundleIdentifier: "company.thebrowser.Browser"
+            )
+                && MusicController.hasEligibleMediaPlayback(
+                    samples: [arcCallSamples[0]],
+                    nowPlayingOwnerBundleIdentifier: "company.thebrowser.Browser"
+                )
+                && !MusicController.hasEligibleMediaPlayback(
+                    samples: [arcCallSamples[0]],
+                    nowPlayingOwnerBundleIdentifier: "com.apple.Music"
+                ),
+            "browser-family playback detection rejects calls and owner mismatches",
+            failures: &failures
+        )
+        let firstMiss = MusicController.playbackTransition(
+            current: true,
+            consecutiveMisses: 0,
+            detected: false
+        )
+        let secondMiss = MusicController.playbackTransition(
+            current: firstMiss.isPlaying,
+            consecutiveMisses: firstMiss.misses,
+            detected: false
+        )
+        check(
+            MusicController.playbackTransition(
+                current: false,
+                consecutiveMisses: 0,
+                detected: true
+            ).isPlaying
+                && firstMiss.isPlaying
+                && !secondMiss.isPlaying,
+            "playback starts immediately and stops after two misses",
+            failures: &failures
+        )
+        let detectedMusic = MusicController(
+            playbackProbe: { true },
+            monitorPlayback: false
+        )
+        detectedMusic.refreshPlaybackState()
+        check(
+            detectedMusic.isPlaying,
+            "injected playback probe publishes the playing state",
             failures: &failures
         )
         check(music.script(for: .next, player: .music).isEmpty, "transport controls cannot launch a named player", failures: &failures)

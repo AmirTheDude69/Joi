@@ -92,7 +92,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var focusTasks: [FocusTaskItem]
 
     let pomodoro: PomodoroTimer
-    let music = MusicController()
+    let music: MusicController
     let avatarMotion = AvatarMotionController()
     let focusTaskLimit = 10
 
@@ -115,6 +115,7 @@ final class AppModel: ObservableObject {
         defaults: UserDefaults = .standard,
         keychain: KeychainStore = KeychainStore(),
         pomodoro: PomodoroTimer? = nil,
+        music: MusicController? = nil,
         openChatGPTVoice: @escaping @MainActor () -> Bool = ChatGPTVoiceLauncher.open
     ) {
         let storedMinutes = defaults.object(forKey: Keys.pomodoroMinutes) as? Int ?? 25
@@ -127,6 +128,9 @@ final class AppModel: ObservableObject {
         self.keychain = keychain
         openChatGPTVoiceURL = openChatGPTVoice
         self.pomodoro = pomodoro ?? PomodoroTimer(minutes: storedMinutes)
+        self.music = music ?? MusicController(
+            monitorPlayback: !CommandLine.arguments.contains("--self-test")
+        )
         focusTasks = Self.loadFocusTasks(from: defaults)
         alwaysOnTop = defaults.object(forKey: Keys.alwaysOnTop) as? Bool ?? true
         reducedMotion = defaults.object(forKey: Keys.reducedMotion) as? Bool ?? false
@@ -152,6 +156,13 @@ final class AppModel: ObservableObject {
             )
         }
         .store(in: &cancellables)
+
+        self.music.$isPlaying
+            .removeDuplicates()
+            .sink { [weak self] isPlaying in
+                self?.avatarMotion.setMusicPlaying(isPlaying)
+            }
+            .store(in: &cancellables)
     }
 
     var avatarAnimation: SpriteAnimation {

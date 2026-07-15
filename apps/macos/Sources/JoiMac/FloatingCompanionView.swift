@@ -282,7 +282,7 @@ private struct AnimatedSpriteView: View {
         if let lookDirection {
             return SpriteSheet.shared.frame(row: lookDirection.row, column: lookDirection.column)
         }
-        return SpriteSheet.shared.frame(row: animation.row, column: frame)
+        return SpriteSheet.shared.frame(animation: animation, column: frame)
     }
 }
 

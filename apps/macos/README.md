@@ -13,7 +13,7 @@ The primary actions are frameless SF Symbols with generous invisible hit targets
 
 ## Install from the DMG
 
-1. Open `Joi-0.5.0-macOS-Universal.dmg`.
+1. Open `Joi-0.6.0-macOS-Universal.dmg`.
 2. Drag **Joi** to **Applications**.
 3. This private-beta build is ad-hoc signed rather than Apple-notarized. On first launch, Control-click Joi in Applications, choose **Open**, then confirm **Open**.
 4. Click Joi, choose **Settings**, and use **Avatar size** to choose 70–140%. The transparent companion window and drag target resize with the avatar.
@@ -42,8 +42,9 @@ The standalone app uses all standard rows in the canonical v2 spritesheet:
 | 7 | Working | A running Focus timer, alternating naturally with Review and quiet Idle rests. It continues even when the controls auto-close. |
 | 8 | Review | Search, Settings, adding a Focus task, ambient variety, and the thoughtful variant inside Waiting/Working contexts. |
 | 9–10 | 16 look directions | Pointer attention while Joi is otherwise idle: up, clockwise intermediates, right, down, left, and back to up, with a 24-point center dead zone. |
+| Standalone dance frames | Dance / vibe | Starts automatically when Joi detects active music from the current supported macOS playback source, including Spotify in Arc. Voice, Focus, Search, and explicit success/failure gestures temporarily take priority; dancing resumes afterward while playback continues. Two missed playback samples are required before returning to Idle, preventing flicker between tracks. |
 
-Reduce Motion in Settings disables cycling and pointer-gaze movement.
+Reduce Motion in Settings disables cycling and pointer-gaze movement. When music is playing with Reduce Motion enabled, Joi holds the first dance pose instead of looping.
 
 ## Build from source
 
