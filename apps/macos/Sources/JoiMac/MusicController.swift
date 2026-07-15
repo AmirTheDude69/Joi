@@ -41,6 +41,21 @@ final class MusicController: ObservableObject {
         case supported
     }
 
+    enum PlaybackProbeState: Int32, Equatable, Sendable {
+        case unavailable = -1
+        case unknown = 0
+        case playing = 1
+        case paused = 2
+        case stopped = 3
+        case interrupted = 4
+    }
+
+    enum PlaybackObservation: Equatable, Sendable {
+        case playing(ownerBundleIdentifier: String?)
+        case notPlaying(ownerBundleIdentifier: String?)
+        case unavailable(ownerBundleIdentifier: String?)
+    }
+
     struct MediaProcessAudioSample: Equatable {
         let bundleIdentifier: String
         let isRunningOutput: Bool
@@ -70,7 +85,6 @@ final class MusicController: ObservableObject {
     @Published private(set) var lastMessage: String?
     @Published private(set) var accessibilityGranted = false
     @Published private(set) var permissionRequired = false
-    @Published private(set) var showsFallbackOption = false
     @Published private(set) var automationPermissionRequired = false
     @Published private(set) var isPlaying = false
 
@@ -84,17 +98,29 @@ final class MusicController: ObservableObject {
     private var pendingAction: Action?
     private var pendingOwnerBundleIdentifier: String?
     private var lastValidatedOwnerBundleIdentifier: String?
-    private let playbackProbe: @Sendable () -> Bool
+    private let playbackProbe: @Sendable () -> PlaybackObservation
     private var playbackMonitorTask: Task<Void, Never>?
-    private var consecutivePlaybackMisses = 0
+    private var consecutiveUnavailableSamples = 0
 
+    init(monitorPlayback: Bool = true) {
+        playbackProbe = { MusicController.detectPlaybackObservation() }
+        refreshAccessibilityPermission()
+        if monitorPlayback {
+            startPlaybackMonitor()
+        }
+    }
+
+    /// Retained for deterministic self-tests and lightweight callers. The
+    /// production initializer above uses the confidence-aware Now Playing probe.
     init(
-        playbackProbe: @escaping @Sendable () -> Bool = {
-            MusicController.detectActivePlayback()
-        },
+        playbackProbe: @escaping @Sendable () -> Bool,
         monitorPlayback: Bool = true
     ) {
-        self.playbackProbe = playbackProbe
+        self.playbackProbe = {
+            playbackProbe()
+                ? .playing(ownerBundleIdentifier: nil)
+                : .notPlaying(ownerBundleIdentifier: nil)
+        }
         refreshAccessibilityPermission()
         if monitorPlayback {
             startPlaybackMonitor()
@@ -112,26 +138,65 @@ final class MusicController: ObservableObject {
     }
 
     nonisolated static func detectActivePlayback() -> Bool {
-        if let owner = currentNowPlayingBundleIdentifier(),
-           isSupportedMediaBundleIdentifier(owner) {
-            return hasActiveSupportedMediaAudio(matchingNowPlayingOwner: owner)
+        if case .playing = detectPlaybackObservation() {
+            return true
         }
-        return hasActiveSupportedMediaAudio()
+        return false
     }
 
-    /// A short stop hysteresis keeps the dance continuous across ordinary track
-    /// transitions while still starting immediately on the first playing sample.
+    /// MediaRemote can distinguish an explicit pause/stop from a momentary
+    /// owner-query failure. Core Audio is used only when that state is unknown,
+    /// keeping browser playback supported without treating arbitrary audio as
+    /// music.
+    nonisolated static func detectPlaybackObservation() -> PlaybackObservation {
+        let ownerBundleIdentifier = currentNowPlayingBundleIdentifier()
+        if let ownerBundleIdentifier,
+           !isSupportedMediaBundleIdentifier(ownerBundleIdentifier) {
+            return .notPlaying(ownerBundleIdentifier: ownerBundleIdentifier)
+        }
+
+        if let ownerBundleIdentifier {
+            let state = PlaybackProbeState(
+                rawValue: JoiCurrentNowPlayingPlaybackState()
+            ) ?? .unavailable
+            switch state {
+            case .playing:
+                return .playing(ownerBundleIdentifier: ownerBundleIdentifier)
+            case .paused, .stopped, .interrupted:
+                return .notPlaying(ownerBundleIdentifier: ownerBundleIdentifier)
+            case .unknown, .unavailable:
+                if hasActiveSupportedMediaAudio(
+                    matchingNowPlayingOwner: ownerBundleIdentifier
+                ) {
+                    return .playing(ownerBundleIdentifier: ownerBundleIdentifier)
+                }
+                return .unavailable(ownerBundleIdentifier: ownerBundleIdentifier)
+            }
+        }
+
+        if hasActiveSupportedMediaAudio() {
+            return .playing(ownerBundleIdentifier: nil)
+        }
+        return .unavailable(ownerBundleIdentifier: nil)
+    }
+
+    /// Definitive player states win immediately. Only an unavailable sample gets
+    /// one 250 ms grace interval for an ordinary track/owner handoff.
     nonisolated static func playbackTransition(
         current: Bool,
-        consecutiveMisses: Int,
-        detected: Bool
-    ) -> (isPlaying: Bool, misses: Int) {
-        if detected {
+        consecutiveUnavailableSamples: Int,
+        observation: PlaybackObservation
+    ) -> (isPlaying: Bool, unavailableSamples: Int) {
+        switch observation {
+        case .playing:
             return (true, 0)
+        case .notPlaying:
+            return (false, 0)
+        case .unavailable:
+            guard current else { return (false, 0) }
+            let samples = consecutiveUnavailableSamples + 1
+            return samples >= 2 ? (false, 0) : (true, samples)
         }
-        guard current else { return (false, 0) }
-        let misses = consecutiveMisses + 1
-        return misses >= 2 ? (false, 0) : (true, misses)
     }
 
     @discardableResult
@@ -151,8 +216,10 @@ final class MusicController: ObservableObject {
                Self.commandSupport(for: command) != .unsupported,
                JoiSendNowPlayingCommand(command.rawValue) {
                 permissionRequired = false
-                showsFallbackOption = true
                 lastMessage = "Command sent to the current media session."
+                if action == .playPause {
+                    optimisticallyTogglePlayback()
+                }
                 return true
             }
 
@@ -326,7 +393,6 @@ final class MusicController: ObservableObject {
                   pendingOwnerBundleIdentifier
               ) else {
             lastMessage = "The current media session changed. Choose a playback button again."
-            showsFallbackOption = false
             return
         }
         _ = performFallback(mediaKey: mediaKey)
@@ -337,7 +403,6 @@ final class MusicController: ObservableObject {
         refreshAccessibilityPermissionWithoutRetry()
         guard accessibilityGranted else {
             permissionRequired = true
-            showsFallbackOption = false
             lastMessage = "macOS needs Accessibility permission for the fallback media key."
             return false
         }
@@ -348,8 +413,10 @@ final class MusicController: ObservableObject {
         pendingAction = nil
         pendingOwnerBundleIdentifier = nil
         permissionRequired = false
-        showsFallbackOption = false
         lastMessage = "Fallback media key sent."
+        if mediaKey == .playPause {
+            optimisticallyTogglePlayback()
+        }
         return true
     }
 
@@ -862,7 +929,7 @@ final class MusicController: ObservableObject {
                 guard !Task.isCancelled, self != nil else { return }
                 self?.setPlaybackState(detected)
                 do {
-                    try await Task.sleep(for: .seconds(1.25))
+                    try await Task.sleep(for: .milliseconds(250))
                 } catch {
                     return
                 }
@@ -870,15 +937,21 @@ final class MusicController: ObservableObject {
         }
     }
 
-    private func setPlaybackState(_ detected: Bool) {
+    private func setPlaybackState(_ observation: PlaybackObservation) {
         let transition = Self.playbackTransition(
             current: isPlaying,
-            consecutiveMisses: consecutivePlaybackMisses,
-            detected: detected
+            consecutiveUnavailableSamples: consecutiveUnavailableSamples,
+            observation: observation
         )
-        consecutivePlaybackMisses = transition.misses
-        guard isPlaying != transition.isPlaying else { return }
-        isPlaying = transition.isPlaying
+        consecutiveUnavailableSamples = transition.unavailableSamples
+        if isPlaying != transition.isPlaying {
+            isPlaying = transition.isPlaying
+        }
+    }
+
+    private func optimisticallyTogglePlayback() {
+        consecutiveUnavailableSamples = 0
+        isPlaying.toggle()
     }
 
     private func isPlaying(_ player: Player) -> Bool {

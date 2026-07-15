@@ -56,6 +56,14 @@ enum JoiSelfTest {
             "avatar scale is clamped to 70–140 percent",
             failures: &failures
         )
+        check(
+            CompanionLayout.normalizedControlRadiusScale(.nan)
+                == CompanionLayout.defaultControlRadiusScale
+                && CompanionLayout.normalizedControlRadiusScale(0.2) == 0.75
+                && CompanionLayout.normalizedControlRadiusScale(2.0) == 1.25,
+            "control radius is clamped to 75–125 percent",
+            failures: &failures
+        )
         let smallCollapsed = CompanionLayout.collapsedSize(scale: 0.70)
         let largeCollapsed = CompanionLayout.collapsedSize(scale: 1.40)
         check(
@@ -67,9 +75,14 @@ enum JoiSelfTest {
             failures: &failures
         )
         check(
-            CompanionLayout.expandedSize(scale: 0.70) == CompanionLayout.baseExpandedSize
+            CompanionLayout.expandedSize(scale: 0.70).width
+                >= CompanionLayout.baseExpandedSize.width
+                && CompanionLayout.expandedSize(scale: 0.70).height
+                    >= CompanionLayout.baseExpandedSize.height
                 && CompanionLayout.expandedSize(scale: 1.40).width > CompanionLayout.baseExpandedSize.width
-                && CompanionLayout.radialRadius(scale: 1.40) > CompanionLayout.baseRadialRadius,
+                && CompanionLayout.radialRadius(scale: 1.40) > CompanionLayout.baseRadialRadius
+                && CompanionLayout.expandedSize(scale: 1, radiusScale: 1.25).width
+                    > CompanionLayout.expandedSize(scale: 1, radiusScale: 0.75).width,
             "expanded menu gains clearance for a large avatar",
             failures: &failures
         )
@@ -96,30 +109,47 @@ enum JoiSelfTest {
             failures: &failures
         )
         for scale in [0.70, 1.0, 1.40] {
-            let size = CompanionLayout.expandedSize(scale: scale)
-            let expandedCenter = CGPoint(x: size.width / 2, y: size.height / 2)
-            let focusPoint = RadialLayout.point(
-                for: .pomodoro,
-                center: expandedCenter,
-                radius: CompanionLayout.radialRadius(scale: scale)
-            )
-            let panelCenter = CGPoint(
-                x: focusPoint.x,
-                y: CompanionLayout.focusPanelCenterY(center: expandedCenter, scale: scale)
-            )
-            let panelRect = CGRect(
-                x: panelCenter.x - CompanionLayout.focusPanelSize.width / 2,
-                y: panelCenter.y - CompanionLayout.focusPanelSize.height / 2,
-                width: CompanionLayout.focusPanelSize.width,
-                height: CompanionLayout.focusPanelSize.height
-            )
-            let buttonRect = CGRect(x: focusPoint.x - 43, y: focusPoint.y - 34, width: 86, height: 68)
-            check(
-                CGRect(origin: .zero, size: size).contains(panelRect)
-                    && !panelRect.intersects(buttonRect),
-                "Focus checklist panel fits without covering its button at \(scale)",
-                failures: &failures
-            )
+            for radiusScale in [0.75, 1.0, 1.25] {
+                let size = CompanionLayout.expandedSize(
+                    scale: scale,
+                    radiusScale: radiusScale
+                )
+                let expandedCenter = CGPoint(x: size.width / 2, y: size.height / 2)
+                let focusPoint = RadialLayout.point(
+                    for: .pomodoro,
+                    center: expandedCenter,
+                    radius: CompanionLayout.radialRadius(
+                        scale: scale,
+                        radiusScale: radiusScale
+                    )
+                )
+                let panelCenter = CGPoint(
+                    x: focusPoint.x,
+                    y: CompanionLayout.focusPanelCenterY(
+                        center: expandedCenter,
+                        scale: scale,
+                        radiusScale: radiusScale
+                    )
+                )
+                let panelRect = CGRect(
+                    x: panelCenter.x - CompanionLayout.focusPanelSize.width / 2,
+                    y: panelCenter.y - CompanionLayout.focusPanelSize.height / 2,
+                    width: CompanionLayout.focusPanelSize.width,
+                    height: CompanionLayout.focusPanelSize.height
+                )
+                let buttonRect = CGRect(
+                    x: focusPoint.x - 35,
+                    y: focusPoint.y - 35,
+                    width: 70,
+                    height: 70
+                )
+                check(
+                    CGRect(origin: .zero, size: size).contains(panelRect)
+                        && !panelRect.intersects(buttonRect),
+                    "Focus panel fits at avatar \(scale), radius \(radiusScale)",
+                    failures: &failures
+                )
+            }
         }
 
         let magnetic = MagneticHoverConfiguration.framerUniversityDefault
@@ -375,25 +405,30 @@ enum JoiSelfTest {
             "browser-family playback detection rejects calls and owner mismatches",
             failures: &failures
         )
-        let firstMiss = MusicController.playbackTransition(
+        let firstUnavailable = MusicController.playbackTransition(
             current: true,
-            consecutiveMisses: 0,
-            detected: false
+            consecutiveUnavailableSamples: 0,
+            observation: .unavailable(ownerBundleIdentifier: "company.thebrowser.Browser")
         )
-        let secondMiss = MusicController.playbackTransition(
-            current: firstMiss.isPlaying,
-            consecutiveMisses: firstMiss.misses,
-            detected: false
+        let secondUnavailable = MusicController.playbackTransition(
+            current: firstUnavailable.isPlaying,
+            consecutiveUnavailableSamples: firstUnavailable.unavailableSamples,
+            observation: .unavailable(ownerBundleIdentifier: nil)
         )
         check(
             MusicController.playbackTransition(
                 current: false,
-                consecutiveMisses: 0,
-                detected: true
+                consecutiveUnavailableSamples: 0,
+                observation: .playing(ownerBundleIdentifier: "com.spotify.client")
             ).isPlaying
-                && firstMiss.isPlaying
-                && !secondMiss.isPlaying,
-            "playback starts immediately and stops after two misses",
+                && !MusicController.playbackTransition(
+                    current: true,
+                    consecutiveUnavailableSamples: 0,
+                    observation: .notPlaying(ownerBundleIdentifier: "com.spotify.client")
+                ).isPlaying
+                && firstUnavailable.isPlaying
+                && !secondUnavailable.isPlaying,
+            "playback starts immediately, stops on pause, and bounds unavailable grace",
             failures: &failures
         )
         let detectedMusic = MusicController(
@@ -446,18 +481,19 @@ enum JoiSelfTest {
                 return true
             }
         )
+        panelModel.isExpanded = true
         panelModel.activateVoice()
         check(
-            panelModel.activePanel == .voice
-                && panelModel.voiceHandoff == .opened
+            panelModel.activePanel == .none
+                && !panelModel.isExpanded
                 && voiceOpenCount == 1,
-            "Voice opens ChatGPT once without an API key or fake listening state",
+            "Voice opens ChatGPT once, collapses Joi, and creates no local panel",
             failures: &failures
         )
         panelModel.activateVoice()
         check(
-            panelModel.activePanel == .none && voiceOpenCount == 1,
-            "second Voice click only closes Joi's local instructions",
+            panelModel.activePanel == .none && voiceOpenCount == 2,
+            "each Voice click is a direct browser handoff",
             failures: &failures
         )
         var quitCount = 0
@@ -475,8 +511,8 @@ enum JoiSelfTest {
         )
         failedVoiceModel.activateVoice()
         check(
-            failedVoiceModel.voiceHandoff == .failed,
-            "failed browser handoff is reported",
+            failedVoiceModel.activePanel == .none,
+            "failed browser handoff does not create a popover",
             failures: &failures
         )
 
@@ -500,6 +536,29 @@ enum JoiSelfTest {
                 && defaults.double(forKey: "joi.avatarScale") == 1.40
                 && observedScale == 1.40,
             "avatar scale setter clamps, persists, and resizes",
+            failures: &failures
+        )
+
+        var observedRadiusScale: Double?
+        panelModel.onControlRadiusScaleChange = { observedRadiusScale = $0 }
+        panelModel.controlRadiusScale = 1.20
+        let radiusReloadedModel = AppModel(
+            defaults: defaults,
+            pomodoro: PomodoroTimer(seconds: 1, completionSound: {}, completionNotification: {}),
+            openChatGPTVoice: { false }
+        )
+        check(
+            observedRadiusScale == 1.20
+                && radiusReloadedModel.controlRadiusScale == 1.20
+                && defaults.double(forKey: "joi.controlRadiusScale") == 1.20,
+            "control radius callback and persistence",
+            failures: &failures
+        )
+        panelModel.controlRadiusScale = 9
+        check(
+            panelModel.controlRadiusScale == 1.25
+                && observedRadiusScale == 1.25,
+            "control radius setter clamps and resizes",
             failures: &failures
         )
 
@@ -543,27 +602,51 @@ enum JoiSelfTest {
         }
         check(
             !panelModel.addFocusTask("Task 11") && panelModel.focusTasks.count == 10,
-            "Focus task list stops at ten",
+            "Focus active task list stops at ten",
             failures: &failures
         )
-        let firstFocusTask = panelModel.focusTasks[0]
-        panelModel.toggleFocusTask(id: firstFocusTask.id)
+        let firstFocusTask = panelModel.activeFocusTasks[0]
+        check(
+            panelModel.toggleFocusTask(id: firstFocusTask.id)
+                && panelModel.activeFocusTasks.count == 9
+                && panelModel.archivedFocusTasks.map(\.id) == [firstFocusTask.id],
+            "completed Focus task moves into Archive and frees an active slot",
+            failures: &failures
+        )
+        check(
+            panelModel.addFocusTask("Replacement")
+                && panelModel.activeFocusTasks.count == 10
+                && panelModel.focusTasks.count == 11,
+            "archived tasks do not consume the ten active slots",
+            failures: &failures
+        )
+        check(
+            !panelModel.toggleFocusTask(id: firstFocusTask.id)
+                && panelModel.activeFocusTasks.count == 10
+                && panelModel.archivedFocusTasks.first?.id == firstFocusTask.id,
+            "Archive restore is blocked while all active slots are occupied",
+            failures: &failures
+        )
         let taskReloadedModel = AppModel(
             defaults: defaults,
             pomodoro: PomodoroTimer(seconds: 1, completionSound: {}, completionNotification: {}),
             openChatGPTVoice: { false }
         )
         check(
-            taskReloadedModel.focusTasks.count == 10
-                && taskReloadedModel.focusTasks[0].id == firstFocusTask.id
-                && taskReloadedModel.focusTasks[0].isCompleted,
-            "Focus tasks and checkmarks persist",
+            taskReloadedModel.activeFocusTasks.count == 10
+                && taskReloadedModel.archivedFocusTasks.first?.id == firstFocusTask.id
+                && taskReloadedModel.focusTasks.count == 11,
+            "active and archived Focus tasks persist",
             failures: &failures
         )
-        panelModel.removeFocusTask(id: firstFocusTask.id)
+        if let replacement = panelModel.activeFocusTasks.first(where: { $0.title == "Replacement" }) {
+            panelModel.removeFocusTask(id: replacement.id)
+        }
         check(
-            panelModel.addFocusTask("Replacement") && panelModel.focusTasks.count == 10,
-            "deleting a Focus task frees a slot",
+            panelModel.toggleFocusTask(id: firstFocusTask.id)
+                && panelModel.activeFocusTasks.contains(where: { $0.id == firstFocusTask.id })
+                && panelModel.archivedFocusTasks.isEmpty,
+            "archived task can be restored when an active slot is available",
             failures: &failures
         )
 

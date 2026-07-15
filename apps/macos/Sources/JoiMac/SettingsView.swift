@@ -149,6 +149,45 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                HStack {
+                    Label("Control radius", systemImage: "circle.dotted")
+                    Spacer()
+                    Text(model.controlRadiusScale, format: .percent.precision(.fractionLength(0)))
+                        .font(.system(.body, design: .monospaced).weight(.semibold))
+                    Button("Default") {
+                        model.controlRadiusScale = CompanionLayout.defaultControlRadiusScale
+                    }
+                    .disabled(
+                        abs(
+                            model.controlRadiusScale
+                                - CompanionLayout.defaultControlRadiusScale
+                        ) < 0.001
+                    )
+                    .magneticHover(enabled: !model.reducedMotion)
+                }
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help("Closer")
+                    Slider(
+                        value: $model.controlRadiusScale,
+                        in: CompanionLayout.controlRadiusScaleRange,
+                        step: CompanionLayout.controlRadiusScaleStep
+                    )
+                    .accessibilityLabel("Control radius")
+                    .accessibilityValue(
+                        Text(
+                            model.controlRadiusScale,
+                            format: .percent.precision(.fractionLength(0))
+                        )
+                    )
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .help("Farther")
+                }
+
                 Divider()
 
                 HStack {

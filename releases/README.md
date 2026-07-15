@@ -1,5 +1,13 @@
 # Joi macOS installers
 
+## Joi 0.7.0
+
+- File: `Joi-0.7.0-macOS-Universal.dmg`
+- macOS: 14 or later
+- Architectures: Apple Silicon and Intel
+- SHA-256: `b5209a97a25ba3ddc6e2b785aca64d8e6bb3dba937e776ed1a29e1a8f6e9fdd5`
+- Highlights: real-time Now Playing state and matching Play/Pause icon, immediate dance stop on pause, silent ChatGPT browser handoff, transparent glass floating controls, ten active Focus tasks plus a persistent Archive, and adjustable radial-control spacing.
+
 ## Joi 0.6.0
 
 - File: `Joi-0.6.0-macOS-Universal.dmg`

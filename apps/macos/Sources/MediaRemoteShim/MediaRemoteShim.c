@@ -6,9 +6,14 @@
 #include <objc/runtime.h>
 
 typedef void (*JoiGetNowPlayingPIDFunction)(dispatch_queue_t, void (^)(int));
+typedef void (*JoiGetNowPlayingPlaybackStateFunction)(
+    dispatch_queue_t,
+    void (^)(uint32_t)
+);
 typedef void (*JoiSendCommandFunction)(int32_t, id);
 typedef id (*JoiObjectMessageFunction)(id, SEL);
 typedef int32_t (*JoiIntegerMessageFunction)(id, SEL);
+typedef uint32_t (*JoiUInt32MessageFunction)(id, SEL);
 typedef intptr_t (*JoiSignedIntegerMessageFunction)(id, SEL);
 typedef unsigned long (*JoiUnsignedIntegerMessageFunction)(id, SEL);
 typedef bool (*JoiBooleanMessageFunction)(id, SEL);
@@ -52,6 +57,28 @@ static int32_t JoiModernNowPlayingProcessIdentifier(void) {
     return processIdentifier > 0 ? processIdentifier : 0;
 }
 
+static int32_t JoiModernNowPlayingPlaybackState(void) {
+    Class requestClass = (Class)objc_getClass("MRNowPlayingRequest");
+    if (requestClass == Nil) {
+        return JoiNowPlayingPlaybackStateUnavailable;
+    }
+
+    SEL stateSelector = sel_registerName("localPlaybackState");
+    Class requestMetaClass = object_getClass((id)requestClass);
+    if (requestMetaClass == Nil ||
+        !class_respondsToSelector(requestMetaClass, stateSelector)) {
+        return JoiNowPlayingPlaybackStateUnavailable;
+    }
+
+    JoiUInt32MessageFunction uint32Message =
+        (JoiUInt32MessageFunction)(void *)objc_msgSend;
+    uint32_t state = uint32Message((id)requestClass, stateSelector);
+    if (state > JoiNowPlayingPlaybackStateInterrupted) {
+        return JoiNowPlayingPlaybackStateUnavailable;
+    }
+    return (int32_t)state;
+}
+
 int32_t JoiCurrentNowPlayingProcessIdentifier(void) {
     static JoiGetNowPlayingPIDFunction function;
     static dispatch_once_t onceToken;
@@ -93,6 +120,47 @@ int32_t JoiCurrentNowPlayingProcessIdentifier(void) {
         dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC)
     );
     return waitResult == 0 && result > 0 ? (int32_t)result : 0;
+}
+
+int32_t JoiCurrentNowPlayingPlaybackState(void) {
+    int32_t modernState = JoiModernNowPlayingPlaybackState();
+    if (modernState != JoiNowPlayingPlaybackStateUnavailable) {
+        return modernState;
+    }
+
+    static JoiGetNowPlayingPlaybackStateFunction function;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        void *handle = dlopen(
+            "/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote",
+            RTLD_LAZY | RTLD_LOCAL
+        );
+        if (handle != NULL) {
+            function = (JoiGetNowPlayingPlaybackStateFunction)dlsym(
+                handle,
+                "MRMediaRemoteGetNowPlayingApplicationPlaybackState"
+            );
+        }
+    });
+
+    if (function == NULL) {
+        return JoiNowPlayingPlaybackStateUnavailable;
+    }
+
+    __block int32_t result = JoiNowPlayingPlaybackStateUnavailable;
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    function(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(uint32_t state) {
+        if (state <= JoiNowPlayingPlaybackStateInterrupted) {
+            result = (int32_t)state;
+        }
+        dispatch_semaphore_signal(semaphore);
+    });
+
+    long waitResult = dispatch_semaphore_wait(
+        semaphore,
+        dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC)
+    );
+    return waitResult == 0 ? result : JoiNowPlayingPlaybackStateUnavailable;
 }
 
 bool JoiSendNowPlayingCommand(int32_t command) {

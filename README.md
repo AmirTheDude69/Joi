@@ -98,9 +98,9 @@ Build the universal DMG on macOS:
 pnpm build:macos
 ```
 
-Or use the checked-in private-beta installer: [Joi 0.6.0 universal DMG](releases/Joi-0.6.0-macOS-Universal.dmg).
+Or use the checked-in private-beta installer: [Joi 0.7.0 universal DMG](releases/Joi-0.7.0-macOS-Universal.dmg).
 
-Open `releases/Joi-0.6.0-macOS-Universal.dmg`, drag Joi to Applications, then Control-click **Joi** and choose **Open** on first launch. Click the avatar to reveal the frameless circular controls and icon-only watch-style music cluster. The supplied magnetic-hover behavior now applies to native buttons, inactive controls auto-close after a configurable delay, Focus includes a persistent ten-item checklist, and Settings includes a 70–140% avatar-size slider. Voice opens the official ChatGPT website; select ChatGPT's Voice icon once and allow browser microphone access, then return to your apps. That browser click is required by ChatGPT and cannot be bypassed by Joi. No OpenAI API key is stored in the app. Transport follows the current macOS Now Playing source, while capability-gated Shuffle/Favorite include a local Spotify Web route for the current Arc session. Active playback automatically switches Joi into her standalone dance loop, while voice, Focus, Search, and explicit feedback animations retain priority.
+Open `releases/Joi-0.7.0-macOS-Universal.dmg`, drag Joi to Applications, then Control-click **Joi** and choose **Open** on first launch. Click the avatar to reveal transparent glass radial controls and the icon-only watch-style music cluster. Magnetic hover applies to every floating button, inactive controls auto-close after a configurable delay, Focus supports ten active tasks plus a persistent Archive, and Settings provides separate Avatar Size and Control Radius sliders. Voice opens the official ChatGPT website without showing a local handoff card; select ChatGPT's Voice icon once and allow browser microphone access. The music cluster follows the current macOS Now Playing source, changes between Play and Pause in real time, and starts or stops Joi's standalone dance as the source's actual playback state changes.
 
 See the full [macOS walkthrough](apps/macos/README.md) and OpenAI's [ChatGPT Voice guide](https://help.openai.com/en/articles/20001274/).
 

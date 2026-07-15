@@ -7,24 +7,24 @@ Joi for macOS is a separate floating companion app. Click the avatar to reveal s
 - Bottom right: compact Focus timer.
 - 6 o'clock: Settings.
 - Bottom left: open or switch to Codex.
-- Top left: an icon-only watchOS-style media honeycomb for previous, pause, next, favorite, shuffle, and lyrics. Transport targets the validated current macOS Now Playing source instead of defaulting to Apple Music. Shuffle and Favorite use capability-gated player commands, plus a local Spotify Web control when Arc owns the current session.
+- Top left: an icon-only watchOS-style media honeycomb for previous, play/pause, next, favorite, shuffle, and lyrics. Transport targets the validated current macOS Now Playing source instead of defaulting to Apple Music. Shuffle and Favorite use capability-gated player commands, plus a local Spotify Web control when Arc owns the current session.
 
-The primary actions are frameless SF Symbols with generous invisible hit targets, including the hollow center of Search. Every native button uses the supplied Framer University Magnetic Hover defaults through a source-faithful SwiftUI adapter. Search, Focus, and Voice keep their selected control visible; click that same control again to close Joi's local card. Inactive controls close after 15 seconds by default, and the timeout is adjustable from 5–60 seconds in Settings. Voice cannot stop or inspect the separate ChatGPT browser session. Drag the avatar to move Joi with screen-space tracking, or right-click it and choose **Close Joi** to exit the app. The companion stays above other windows by default, can be resized from 70–140% in Settings, and has a small menu-bar item for Show, Settings, and Quit.
+Every floating button uses the same transparent glass material and the supplied Framer University Magnetic Hover defaults through a source-faithful SwiftUI adapter. Search and Focus keep their selected control visible; click that control again to close its card. Voice opens ChatGPT and immediately collapses Joi's menu without showing a handoff popover. Inactive controls close after 15 seconds by default, and the timeout is adjustable from 5–60 seconds in Settings. Drag the avatar to move Joi, or right-click it and choose **Close Joi**. Settings supports 70–140% avatar sizing and 75–125% control radius.
 
 ## Install from the DMG
 
-1. Open `Joi-0.6.0-macOS-Universal.dmg`.
+1. Open `Joi-0.7.0-macOS-Universal.dmg`.
 2. Drag **Joi** to **Applications**.
 3. This private-beta build is ad-hoc signed rather than Apple-notarized. On first launch, Control-click Joi in Applications, choose **Open**, then confirm **Open**.
-4. Click Joi, choose **Settings**, and use **Avatar size** to choose 70–140%. The transparent companion window and drag target resize with the avatar.
-5. Click **Voice**. Joi opens `chatgpt.com` in the default browser. Select ChatGPT's Voice icon once and allow microphone access, then return to your apps. ChatGPT requires that browser interaction; Joi cannot safely auto-click it. Choose **Maple** in ChatGPT's voice settings for the closest cheerful/candid match. If ChatGPT offers Background Conversations for your account, enable that in ChatGPT settings.
-6. Start playback in your preferred source, then use Joi's transport controls. Joi sends previous/play-pause/next to the validated current Now Playing session. If the small shield or retry icon appears, enable the installed `/Applications/Joi.app` in System Settings → Privacy & Security → Accessibility and retry. Favorite and Shuffle in Spotify Web use the already-open `open.spotify.com` tab only when Arc owns Now Playing; macOS may ask once for permission to let Joi automate Arc. Native Music or Spotify helpers may likewise request Automation permission. Joi never opens Apple Music as a fallback.
+4. Click Joi, choose **Settings**, and set **Avatar size** and **Control radius** independently.
+5. Click **Voice**. Joi opens `chatgpt.com` and closes its controls without displaying another card. Select ChatGPT's Voice icon once and allow microphone access. ChatGPT requires that browser interaction; Joi cannot safely auto-click it. Choose **Maple** in ChatGPT's voice settings for the closest cheerful/candid match.
+6. Start playback in your preferred source, then use Joi's transport controls. The central control shows Play while stopped or paused and Pause while playing. If the small permission shield appears, enable the installed `/Applications/Joi.app` in System Settings → Privacy & Security → Accessibility. Favorite and Shuffle in Spotify Web use the already-open `open.spotify.com` tab only when Arc owns Now Playing. Joi never opens Apple Music as a fallback.
 
 The universal DMG supports Apple Silicon and Intel Macs and requires macOS 14 or later.
 
 ## Focus timer
 
-Click **Focus** to open the compact Clock-style card. Pick 15, 25, 30, or 45 minutes and press Start. Add up to ten local tasks beneath Reset and Start, check them off, or remove them; the checklist persists across launches. The same Focus icon closes the card without cancelling an active timer. Reopen it to pause, resume, or reset the timer. Completion always plays a local alert with system-sound fallbacks, posts a notification banner when permitted, and triggers Joi's celebration animation.
+Click **Focus** to open the compact Clock-style card. Pick 15, 25, 30, or 45 minutes and press Start. Add up to ten active tasks beneath Reset and Start. Checking one moves it under **Archive** and immediately frees an active slot; archived items persist until deleted and can be restored whenever fewer than ten active tasks remain. The same Focus icon closes the card without cancelling an active timer. Completion plays a local alert, posts a notification when permitted, and triggers Joi's celebration animation.
 
 ## Avatar animation map
 
@@ -38,11 +38,11 @@ The standalone app uses all standard rows in the canonical v2 spritesheet:
 | 3 | Wave | Successful previous/play-pause/next/shuffle/lyrics actions, a completed checklist item, greetings, ambient variety, and the final half of celebrations. |
 | 4 | Jump | Successful Favorite, Focus completion, all checklist items completed, ambient variety, then Wave. |
 | 5 | Failed | ChatGPT browser handoff failure or an unavailable/failed music action. |
-| 6 | Waiting | Successful ChatGPT Voice handoff, paused Focus, and ambient variety. Long-lived Waiting alternates with Review and quiet Idle rests. |
+| 6 | Waiting | Paused Focus and ambient variety. Long-lived Waiting alternates with Review and quiet Idle rests. |
 | 7 | Working | A running Focus timer, alternating naturally with Review and quiet Idle rests. It continues even when the controls auto-close. |
 | 8 | Review | Search, Settings, adding a Focus task, ambient variety, and the thoughtful variant inside Waiting/Working contexts. |
 | 9–10 | 16 look directions | Pointer attention while Joi is otherwise idle: up, clockwise intermediates, right, down, left, and back to up, with a 24-point center dead zone. |
-| Standalone dance frames | Dance / vibe | Starts automatically when Joi detects active music from the current supported macOS playback source, including Spotify in Arc. Voice, Focus, Search, and explicit success/failure gestures temporarily take priority; dancing resumes afterward while playback continues. Two missed playback samples are required before returning to Idle, preventing flicker between tracks. |
+| Standalone dance frames | Dance / vibe | Starts automatically when Joi detects active music from the current supported macOS playback source, including Spotify in Arc. Focus, Search, and explicit success/failure gestures temporarily take priority. A definitive pause or stop ends dancing on the next 250 ms sample; an unavailable source receives at most one brief grace sample during track changes. |
 
 Reduce Motion in Settings disables cycling and pointer-gaze movement. When music is playing with Reduce Motion enabled, Joi holds the first dance pose instead of looping.
 

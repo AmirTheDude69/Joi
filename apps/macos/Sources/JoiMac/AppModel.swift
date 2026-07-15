@@ -6,15 +6,8 @@ import Foundation
 final class AppModel: ObservableObject {
     enum ActivePanel: Equatable {
         case none
-        case voice
         case search
         case pomodoro
-    }
-
-    enum VoiceHandoff: Equatable {
-        case ready
-        case opened
-        case failed
     }
 
     @Published var isExpanded = false {
@@ -61,6 +54,16 @@ final class AppModel: ObservableObject {
             onAvatarScaleChange?(normalized)
         }
     }
+    @Published var controlRadiusScale: Double {
+        didSet {
+            let normalized = CompanionLayout.normalizedControlRadiusScale(controlRadiusScale)
+            if normalized != controlRadiusScale {
+                controlRadiusScale = normalized
+            }
+            defaults.set(normalized, forKey: Keys.controlRadiusScale)
+            onControlRadiusScaleChange?(normalized)
+        }
+    }
     @Published var menuAutoCloseSeconds: Int {
         didSet {
             let normalized = MenuInactivityPolicy.normalizedSeconds(menuAutoCloseSeconds)
@@ -88,7 +91,6 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var settingsMessage: String?
-    @Published private(set) var voiceHandoff: VoiceHandoff = .ready
     @Published private(set) var focusTasks: [FocusTaskItem]
 
     let pomodoro: PomodoroTimer
@@ -98,6 +100,7 @@ final class AppModel: ObservableObject {
 
     var onExpandedChange: ((Bool) -> Void)?
     var onAvatarScaleChange: ((Double) -> Void)?
+    var onControlRadiusScaleChange: ((Double) -> Void)?
     var onAlwaysOnTopChange: ((Bool) -> Void)?
     var onOpenSettings: (() -> Void)?
     var onQuit: (() -> Void)?
@@ -121,6 +124,9 @@ final class AppModel: ObservableObject {
         let storedMinutes = defaults.object(forKey: Keys.pomodoroMinutes) as? Int ?? 25
         let storedScale = defaults.object(forKey: Keys.avatarScale) as? Double
             ?? CompanionLayout.defaultAvatarScale
+        let storedControlRadiusScale = defaults.object(
+            forKey: Keys.controlRadiusScale
+        ) as? Double ?? CompanionLayout.defaultControlRadiusScale
         let storedMenuAutoCloseSeconds = defaults.object(
             forKey: Keys.menuAutoCloseSeconds
         ) as? Int ?? MenuInactivityPolicy.defaultSeconds
@@ -135,6 +141,9 @@ final class AppModel: ObservableObject {
         alwaysOnTop = defaults.object(forKey: Keys.alwaysOnTop) as? Bool ?? true
         reducedMotion = defaults.object(forKey: Keys.reducedMotion) as? Bool ?? false
         avatarScale = CompanionLayout.normalizedScale(storedScale)
+        controlRadiusScale = CompanionLayout.normalizedControlRadiusScale(
+            storedControlRadiusScale
+        )
         menuAutoCloseSeconds = MenuInactivityPolicy.normalizedSeconds(
             storedMenuAutoCloseSeconds
         )
@@ -167,6 +176,24 @@ final class AppModel: ObservableObject {
 
     var avatarAnimation: SpriteAnimation {
         avatarMotion.animation
+    }
+
+    var activeFocusTasks: [FocusTaskItem] {
+        focusTasks.filter { !$0.isCompleted }
+    }
+
+    var archivedFocusTasks: [FocusTaskItem] {
+        focusTasks.enumerated()
+            .filter { $0.element.isCompleted }
+            .sorted { lhs, rhs in
+                let lhsDate = lhs.element.completedAt ?? .distantPast
+                let rhsDate = rhs.element.completedAt ?? .distantPast
+                if lhsDate != rhsDate {
+                    return lhsDate > rhsDate
+                }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
 
     func toggleExpanded() {
@@ -227,30 +254,20 @@ final class AppModel: ObservableObject {
         avatarMotion.play(.review)
     }
 
-    /// ChatGPT's web voice UI requires its own explicit Voice-button click and
-    /// browser microphone permission. Joi opens the official site and explains
-    /// that handoff without pretending it can observe the external session.
+    /// ChatGPT's browser UI owns microphone permission and Voice activation.
+    /// Joi performs a silent handoff and immediately collapses its local menu.
     func activateVoice() {
-        if activePanel == .voice {
-            activePanel = .none
-            return
+        let opened = openChatGPTVoiceURL()
+        if isExpanded {
+            isExpanded = false
         }
-        activePanel = .voice
-        applyVoiceHandoff(openChatGPTVoiceURL())
-    }
-
-    func openChatGPTVoiceAgain() {
-        applyVoiceHandoff(openChatGPTVoiceURL())
+        avatarMotion.play(opened ? .waving : .failed)
     }
 
     func openChatGPTVoiceFromSettings() {
         settingsMessage = openChatGPTVoiceURL()
             ? "ChatGPT opened. Select its Voice icon and allow microphone access."
             : "ChatGPT could not be opened in your default browser."
-    }
-
-    func dismissVoiceHandoff() {
-        activePanel = .none
     }
 
     func performMusic(_ action: MusicController.Action) {
@@ -270,27 +287,43 @@ final class AppModel: ObservableObject {
     @discardableResult
     func addFocusTask(_ title: String) -> Bool {
         let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty, focusTasks.count < focusTaskLimit else {
+        guard !normalized.isEmpty, activeFocusTasks.count < focusTaskLimit else {
             return false
         }
-        focusTasks.append(FocusTaskItem(title: normalized))
+        let firstArchivedIndex = focusTasks.firstIndex(where: \.isCompleted)
+            ?? focusTasks.endIndex
+        focusTasks.insert(FocusTaskItem(title: normalized), at: firstArchivedIndex)
         persistFocusTasks()
         noteMenuInteraction()
         avatarMotion.play(.review)
         return true
     }
 
-    func toggleFocusTask(id: FocusTaskItem.ID) {
+    @discardableResult
+    func toggleFocusTask(id: FocusTaskItem.ID) -> Bool {
         guard let index = focusTasks.firstIndex(where: { $0.id == id }) else {
-            return
+            return false
         }
-        focusTasks[index].isCompleted.toggle()
+
+        if focusTasks[index].isCompleted {
+            guard activeFocusTasks.count < focusTaskLimit else {
+                return false
+            }
+            focusTasks[index].isCompleted = false
+            focusTasks[index].completedAt = nil
+        } else {
+            focusTasks[index].isCompleted = true
+            focusTasks[index].completedAt = Date()
+        }
+        let completedTask = focusTasks[index].isCompleted
+        focusTasks = Self.orderedFocusTasks(focusTasks)
         persistFocusTasks()
         noteMenuInteraction()
-        if focusTasks[index].isCompleted {
-            let allComplete = !focusTasks.isEmpty && focusTasks.allSatisfy(\.isCompleted)
+        if completedTask {
+            let allComplete = !focusTasks.isEmpty && activeFocusTasks.isEmpty
             avatarMotion.playSequence(allComplete ? [.jumping, .waving] : [.waving])
         }
+        return true
     }
 
     func removeFocusTask(id: FocusTaskItem.ID) {
@@ -313,16 +346,6 @@ final class AppModel: ObservableObject {
             update()
         } else {
             NSAnimationContext.runAnimationGroup { _ in update() }
-        }
-    }
-
-    private func applyVoiceHandoff(_ opened: Bool) {
-        voiceHandoff = opened ? .opened : .failed
-        if opened {
-            avatarMotion.setContext(.waiting)
-        } else {
-            avatarMotion.setContext(nil)
-            avatarMotion.play(.failed)
         }
     }
 
@@ -362,10 +385,26 @@ final class AppModel: ObservableObject {
         guard let data = defaults.data(forKey: Keys.focusTasks),
               let decoded = try? JSONDecoder().decode([FocusTaskItem].self, from: data)
         else { return [] }
-        return decoded
+        return orderedFocusTasks(
+            decoded
             .filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .prefix(10)
-            .map { $0 }
+        )
+    }
+
+    private static func orderedFocusTasks(_ tasks: [FocusTaskItem]) -> [FocusTaskItem] {
+        let active = tasks.filter { !$0.isCompleted }
+        let archived = tasks.enumerated()
+            .filter { $0.element.isCompleted }
+            .sorted { lhs, rhs in
+                let lhsDate = lhs.element.completedAt ?? .distantPast
+                let rhsDate = rhs.element.completedAt ?? .distantPast
+                if lhsDate != rhsDate {
+                    return lhsDate > rhsDate
+                }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
+        return active + archived
     }
 
     private func updateAvatar(
@@ -373,18 +412,14 @@ final class AppModel: ObservableObject {
         activePanel: ActivePanel
     ) {
         let context: SpriteAnimation?
-        if activePanel == .voice {
+        if pomodoroState == .running {
+            context = .working
+        } else if pomodoroState == .paused {
             context = .waiting
+        } else if activePanel == .search {
+            context = .review
         } else {
-            if pomodoroState == .running {
-                context = .working
-            } else if pomodoroState == .paused {
-                context = .waiting
-            } else if activePanel == .search {
-                context = .review
-            } else {
-                context = nil
-            }
+            context = nil
         }
         avatarMotion.setContext(context)
 
@@ -400,6 +435,7 @@ final class AppModel: ObservableObject {
         static let alwaysOnTop = "joi.alwaysOnTop"
         static let reducedMotion = "joi.reducedMotion"
         static let avatarScale = "joi.avatarScale"
+        static let controlRadiusScale = "joi.controlRadiusScale"
         static let menuAutoCloseSeconds = "joi.menuAutoCloseSeconds"
         static let pomodoroMinutes = "joi.pomodoroMinutes"
         static let focusTasks = "joi.focusTasks"

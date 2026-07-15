@@ -7,12 +7,20 @@ enum JoiPreviewRenderer {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let originalScale = model.avatarScale
-        defer { model.avatarScale = originalScale }
+        let originalRadiusScale = model.controlRadiusScale
+        defer {
+            model.avatarScale = originalScale
+            model.controlRadiusScale = originalRadiusScale
+        }
         model.avatarScale = CompanionLayout.defaultAvatarScale
+        model.controlRadiusScale = CompanionLayout.defaultControlRadiusScale
 
         model.isExpanded = true
         model.activePanel = .none
-        let expandedSize = CompanionLayout.expandedSize(scale: model.avatarScale)
+        let expandedSize = CompanionLayout.expandedSize(
+            scale: model.avatarScale,
+            radiusScale: model.controlRadiusScale
+        )
         try write(
             FloatingCompanionView(model: model).frame(width: expandedSize.width, height: expandedSize.height),
             size: expandedSize,
@@ -33,7 +41,11 @@ enum JoiPreviewRenderer {
         )
 
         model.avatarScale = 1.40
-        let largeExpandedSize = CompanionLayout.expandedSize(scale: model.avatarScale)
+        model.controlRadiusScale = CompanionLayout.controlRadiusScaleRange.upperBound
+        let largeExpandedSize = CompanionLayout.expandedSize(
+            scale: model.avatarScale,
+            radiusScale: model.controlRadiusScale
+        )
         try write(
             FloatingCompanionView(model: model).frame(
                 width: largeExpandedSize.width,
@@ -44,13 +56,7 @@ enum JoiPreviewRenderer {
         )
 
         model.avatarScale = CompanionLayout.defaultAvatarScale
-
-        model.activePanel = .voice
-        try write(
-            FloatingCompanionView(model: model).frame(width: expandedSize.width, height: expandedSize.height),
-            size: expandedSize,
-            to: directory.appendingPathComponent("voice-mode.png")
-        )
+        model.controlRadiusScale = CompanionLayout.defaultControlRadiusScale
 
         try write(
             SettingsView(model: model).frame(width: 540, height: 880),

@@ -10,7 +10,7 @@
 - PostgreSQL/pgvector migration with row-level tenant policies and queue-ready automation fields.
 - Codex plugin manifest, ten skills, local MCP configuration, pet assets, and macOS/Linux/Windows installer scripts.
 - PWA chat, state-synchronized avatar, 16-direction gaze, tasks, memory, approval inbox, automation templates, settings, responsive layout, service worker, and reduced motion.
-- Universal native macOS companion with a draggable floating avatar, six-position radial menu, Keychain-backed `gpt-realtime-2.1` voice, Pomodoro, browser search, Codex switching, Music/Spotify controls, launch-at-login, and reduced motion.
+- Universal native macOS companion with a draggable floating avatar, six-position glass radial menu, silent ChatGPT Voice browser handoff, Pomodoro with active/archive tasks, browser search, Codex switching, real-time Music/Spotify controls, launch-at-login, and reduced motion.
 - Capability flags distinguish implemented beta behavior from planned MVP release gates, preventing unavailable features from being enabled.
 
 ## Deliberate launch gates
@@ -37,7 +37,7 @@ These cannot be honestly completed from source code alone and remain disabled or
 | 2 — Private Codex plugin | Implemented for local beta | Hosted OAuth and real Google connectors remain gated. |
 | 3 — Public plugin beta | Foundation only | Auth, billing, support, and security review required. |
 | 4 — Web/PWA beta | Runnable local beta | Production accounts, push, persistence, and billing required. |
-| 5 — Voice | Private macOS beta | Local Keychain-backed Realtime voice works; production credential brokering, operations, and public feature flags remain gated. |
+| 5 — Voice | Private macOS beta | The app performs a credential-free ChatGPT browser handoff; a native Realtime session still requires production ephemeral-credential brokering and safety/retention operations. |
 | 6 — Custom companions | Disabled | Consent and moderation pipeline required first. |
 
 ## Go-live rule

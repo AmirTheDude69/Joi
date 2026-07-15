@@ -59,7 +59,11 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, U
     }
 
     private func createCompanionPanel() {
-        let size = CompanionLayout.panelSize(expanded: false, scale: model.avatarScale)
+        let size = CompanionLayout.panelSize(
+            expanded: false,
+            scale: model.avatarScale,
+            radiusScale: model.controlRadiusScale
+        )
         let panel = CompanionPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .fullSizeContentView],
@@ -104,6 +108,9 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, U
         model.onAvatarScaleChange = { [weak self] _ in
             self?.resizePanel(expanded: self?.model.isExpanded ?? false, animate: false)
         }
+        model.onControlRadiusScaleChange = { [weak self] _ in
+            self?.resizePanel(expanded: self?.model.isExpanded ?? false, animate: false)
+        }
         model.onAlwaysOnTopChange = { [weak self] alwaysOnTop in
             self?.companionPanel?.level = alwaysOnTop ? .floating : .normal
         }
@@ -124,7 +131,11 @@ final class JoiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, U
     private func resizePanel(expanded: Bool, animate: Bool) {
         guard let panel = companionPanel else { return }
         finishPanelDrag()
-        let target = CompanionLayout.panelSize(expanded: expanded, scale: model.avatarScale)
+        let target = CompanionLayout.panelSize(
+            expanded: expanded,
+            scale: model.avatarScale,
+            radiusScale: model.controlRadiusScale
+        )
         let center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
         var frame = NSRect(
             x: center.x - target.width / 2,
