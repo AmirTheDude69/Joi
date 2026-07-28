@@ -7,7 +7,7 @@ The plugin bundles Joi's workflows, MCP connection, pet assets, and user-control
 1. Install Node.js 22+, enable Corepack, and clone the repository:
 
    ```bash
-   git clone https://github.com/AmirTheDude69/Joi.git
+   git clone https://github.com/TheDudeCommits/Joi.git
    cd Joi
    corepack enable
    pnpm install
@@ -39,7 +39,7 @@ The plugin bundles Joi's workflows, MCP connection, pet assets, and user-control
 4. Add the repository marketplace and install the plugin:
 
    ```bash
-   codex plugin marketplace add AmirTheDude69/Joi --ref main
+   codex plugin marketplace add TheDudeCommits/Joi --ref main
    codex plugin add joi-assistant@joi
    ```
 
