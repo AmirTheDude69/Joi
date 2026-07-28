@@ -1,0 +1,4 @@
+interface:
+  display_name: "Relationship Idea"
+  short_description: "Suggest thoughtful activities by place and budget"
+  default_prompt: "Use $joi-relationship-idea to suggest a thoughtful date idea."

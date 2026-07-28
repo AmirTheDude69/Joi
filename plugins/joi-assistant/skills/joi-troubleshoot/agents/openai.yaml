@@ -1,0 +1,4 @@
+interface:
+  display_name: "Joi Troubleshoot"
+  short_description: "Diagnose plugin, authentication, and tool issues"
+  default_prompt: "Use $joi-troubleshoot to diagnose why Joi is not working."

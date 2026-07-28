@@ -1,0 +1,4 @@
+.build/
+.build-arm64/
+.build-x86_64/
+.icon-build/

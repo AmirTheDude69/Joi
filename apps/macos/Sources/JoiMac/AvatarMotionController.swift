@@ -1,0 +1,262 @@
+import Combine
+import Foundation
+
+/// Coordinates semantic actions with all sprite rows without leaving any short
+/// gesture on an artificial infinite loop.
+@MainActor
+final class AvatarMotionController: ObservableObject {
+    @Published private(set) var animation: SpriteAnimation = .idle
+    @Published private(set) var isAnimating = false
+
+    private var contextAnimation: SpriteAnimation?
+    private var contextTask: Task<Void, Never>?
+    private var transientTask: Task<Void, Never>?
+    private var transientToken: UUID?
+    private var ambientTask: Task<Void, Never>?
+    private var musicTask: Task<Void, Never>?
+    private var ambientIndex = 0
+    private var contextIndex = 0
+    private var musicIsPlaying = false
+    private var userReducedMotion = false
+    private var systemReducedMotion = false
+
+    private let ambientSequence: [SpriteAnimation] = [
+        .idle, .waving, .idle, .review, .idle, .waiting, .idle, .jumping,
+    ]
+
+    init() {
+        ambientTask = Task { [weak self] in
+            await self?.runAmbientLoop()
+        }
+    }
+
+    deinit {
+        ambientTask?.cancel()
+        musicTask?.cancel()
+    }
+
+    var allowsGazeTracking: Bool {
+        !isReducedMotionEnabled
+            && contextAnimation == nil
+            && transientToken == nil
+            && animation == .idle
+            && !isAnimating
+            && !musicIsPlaying
+    }
+
+    var isReducedMotionEnabled: Bool {
+        userReducedMotion || systemReducedMotion
+    }
+
+    func setReducedMotion(_ enabled: Bool) {
+        userReducedMotion = enabled
+        applyReducedMotionState()
+    }
+
+    func setSystemReducedMotion(_ enabled: Bool) {
+        systemReducedMotion = enabled
+        applyReducedMotionState()
+    }
+
+    /// Persistent states use one contextual cycle, one idle cycle, then a quiet
+    /// hold before the next varied gesture. This keeps long focus/listening states
+    /// expressive without repeating a sub-second strip forever.
+    func setContext(_ animation: SpriteAnimation?) {
+        guard contextAnimation != animation else { return }
+        contextAnimation = animation
+        cancelTransient()
+        cancelContext()
+        guard let animation else {
+            applyRestingState()
+            return
+        }
+        if isReducedMotionEnabled {
+            self.animation = animation
+            isAnimating = false
+        } else {
+            startContextLoop(animation)
+        }
+    }
+
+    func play(_ animation: SpriteAnimation, cycles: Int = 1) {
+        playSequence(Array(repeating: animation, count: max(1, cycles)))
+    }
+
+    func playSequence(_ animations: [SpriteAnimation]) {
+        guard contextAnimation == nil, !animations.isEmpty else { return }
+        cancelTransient()
+        let token = UUID()
+        transientToken = token
+        transientTask = Task { [weak self] in
+            guard let self else { return }
+            for animation in animations {
+                guard !Task.isCancelled, self.transientToken == token, self.contextAnimation == nil else { return }
+                self.animation = animation
+                self.isAnimating = !self.isReducedMotionEnabled
+                let duration = self.isReducedMotionEnabled ? 0.35 : animation.cycleDuration
+                try? await Task.sleep(for: .seconds(duration))
+            }
+            guard !Task.isCancelled, self.transientToken == token else { return }
+            self.transientToken = nil
+            self.transientTask = nil
+            if let contextAnimation = self.contextAnimation {
+                self.animation = contextAnimation
+                self.isAnimating = false
+            } else {
+                self.applyRestingState()
+            }
+        }
+    }
+
+    /// Music is a low-priority ambient state: explicit app actions and
+    /// persistent voice/focus/search contexts always remain authoritative.
+    func setMusicPlaying(_ playing: Bool) {
+        guard musicIsPlaying != playing else {
+            if playing {
+                reconcileMusicAnimation()
+            }
+            return
+        }
+        musicIsPlaying = playing
+        if playing {
+            startMusicLoop()
+        } else {
+            musicTask?.cancel()
+            musicTask = nil
+        }
+        guard contextAnimation == nil, transientToken == nil else { return }
+        applyRestingState()
+    }
+
+    /// Playback is sampled independently from animation timing. Reasserting the
+    /// low-priority dance state prevents a completed ambient/transient gesture or
+    /// a delayed SwiftUI update from leaving Joi motionless while music continues.
+    private func startMusicLoop() {
+        musicTask?.cancel()
+        musicTask = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.reconcileMusicAnimation()
+                do {
+                    try await Task.sleep(for: .seconds(1.5))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func reconcileMusicAnimation() {
+        guard musicIsPlaying,
+              contextAnimation == nil,
+              transientToken == nil else { return }
+        if animation != .dancing
+            || isAnimating == isReducedMotionEnabled {
+            applyRestingState()
+        }
+    }
+
+    private func startContextLoop(_ context: SpriteAnimation) {
+        contextTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled, self.contextAnimation == context {
+                let variants = self.contextVariants(for: context)
+                let gesture = variants[self.contextIndex % variants.count]
+                self.contextIndex += 1
+
+                self.animation = gesture
+                self.isAnimating = true
+                try? await Task.sleep(for: .seconds(gesture.cycleDuration))
+                guard !Task.isCancelled, self.contextAnimation == context else { return }
+
+                self.animation = .idle
+                self.isAnimating = true
+                try? await Task.sleep(for: .seconds(SpriteAnimation.idle.cycleDuration))
+                guard !Task.isCancelled, self.contextAnimation == context else { return }
+
+                self.isAnimating = false
+                try? await Task.sleep(for: .seconds(self.contextRest(for: context)))
+            }
+        }
+    }
+
+    private func contextVariants(for context: SpriteAnimation) -> [SpriteAnimation] {
+        switch context {
+        case .working:
+            [.working, .review]
+        case .waiting:
+            [.waiting, .review]
+        case .waving:
+            [.waving, .review]
+        case .review:
+            [.review, .waiting]
+        case .failed:
+            [.failed]
+        case .idle, .runningRight, .runningLeft, .jumping, .dancing:
+            [context]
+        }
+    }
+
+    private func contextRest(for context: SpriteAnimation) -> Double {
+        switch context {
+        case .waving:
+            Double.random(in: 1.5 ... 2.8)
+        case .waiting:
+            Double.random(in: 3.0 ... 5.0)
+        case .working:
+            Double.random(in: 4.0 ... 7.0)
+        case .review:
+            Double.random(in: 4.0 ... 6.5)
+        case .failed:
+            Double.random(in: 6.0 ... 9.0)
+        case .idle, .runningRight, .runningLeft, .jumping, .dancing:
+            Double.random(in: 3.0 ... 5.0)
+        }
+    }
+
+    private func applyReducedMotionState() {
+        cancelTransient()
+        cancelContext()
+        if let contextAnimation {
+            if isReducedMotionEnabled {
+                animation = contextAnimation
+                isAnimating = false
+            } else {
+                startContextLoop(contextAnimation)
+            }
+        } else {
+            applyRestingState()
+        }
+    }
+
+    private func cancelTransient() {
+        transientTask?.cancel()
+        transientTask = nil
+        transientToken = nil
+    }
+
+    private func cancelContext() {
+        contextTask?.cancel()
+        contextTask = nil
+    }
+
+    private func runAmbientLoop() async {
+        while !Task.isCancelled {
+            let delay = Double.random(in: 4.5 ... 8.0)
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled,
+                  contextAnimation == nil,
+                  transientToken == nil,
+                  !isReducedMotionEnabled,
+                  !musicIsPlaying
+            else { continue }
+            let next = ambientSequence[ambientIndex % ambientSequence.count]
+            ambientIndex += 1
+            play(next)
+        }
+    }
+
+    private func applyRestingState() {
+        animation = musicIsPlaying ? .dancing : .idle
+        isAnimating = musicIsPlaying && !isReducedMotionEnabled
+    }
+}

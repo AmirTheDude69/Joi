@@ -1,0 +1,28 @@
+{
+  "name": "@joi/agent",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@joi/contracts": "workspace:*",
+    "@joi/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@openai/agents": "^0.13.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.0.0",
+    "express": "^5.1.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.0",
+    "tsx": "^4.20.0"
+  }
+}

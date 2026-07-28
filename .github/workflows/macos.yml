@@ -1,0 +1,18 @@
+name: macOS app
+
+on:
+  push:
+    branches: [main, "codex/**"]
+  pull_request:
+
+jobs:
+  native-checks:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native app
+        run: swift build --package-path apps/macos
+      - name: Run native self-test
+        run: |
+          BIN_DIR="$(swift build --package-path apps/macos --show-bin-path)"
+          "$BIN_DIR/Joi" --self-test

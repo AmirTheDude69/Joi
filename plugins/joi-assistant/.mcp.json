@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "joi": {
+      "url": "http://127.0.0.1:8787/mcp",
+      "bearer_token_env_var": "JOI_DEV_AUTH_TOKEN",
+      "default_tools_approval_mode": "writes",
+      "tool_timeout_sec": 60,
+      "enabled": true,
+      "tools": {
+        "joi.google.gmail.request_send": { "approval_mode": "approve" },
+        "joi.google.calendar.request_create": { "approval_mode": "approve" },
+        "joi.approvals.approve": { "approval_mode": "approve" }
+      }
+    }
+  }
+}

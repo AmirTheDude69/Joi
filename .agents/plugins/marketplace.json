@@ -1,0 +1,20 @@
+{
+  "name": "joi",
+  "interface": {
+    "displayName": "Joi"
+  },
+  "plugins": [
+    {
+      "name": "joi-assistant",
+      "source": {
+        "source": "local",
+        "path": "./plugins/joi-assistant"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

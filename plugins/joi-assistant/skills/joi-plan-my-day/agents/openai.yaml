@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan My Day"
+  short_description: "Plan priorities around calendar commitments"
+  default_prompt: "Use $joi-plan-my-day to build a realistic plan for today."

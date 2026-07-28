@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remember"
+  short_description: "Save explicit memories with user-controlled privacy"
+  default_prompt: "Use $joi-remember to save this preference in my editable memory."

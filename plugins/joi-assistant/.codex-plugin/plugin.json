@@ -1,0 +1,46 @@
+{
+  "name": "joi-assistant",
+  "version": "0.2.0+codex.20260710130325",
+  "description": "A warm productivity companion with editable memory, Google workflows, and approval-first actions.",
+  "author": {
+    "name": "TheDudeCommits",
+    "url": "https://github.com/TheDudeCommits"
+  },
+  "homepage": "https://github.com/TheDudeCommits/Joi",
+  "repository": "https://github.com/TheDudeCommits/Joi",
+  "keywords": [
+    "assistant",
+    "productivity",
+    "calendar",
+    "gmail",
+    "memory",
+    "pet"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Joi Assistant",
+    "shortDescription": "A warm, approval-first daily companion",
+    "longDescription": "Plan your day, triage email, prepare meetings, manage tasks and explicit memory, and preview external actions before approval\u2014with the animated Joi pet included.",
+    "developerName": "TheDudeCommits",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Reversible write",
+      "Approval-gated external write"
+    ],
+    "websiteURL": "https://github.com/TheDudeCommits/Joi",
+    "defaultPrompt": [
+      "Use Joi to plan my day around my calendar.",
+      "Use Joi to brief my inbox without sending anything.",
+      "Use Joi to prepare me for my next meeting."
+    ],
+    "brandColor": "#B84F2D",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/preview.png",
+    "screenshots": [
+      "./assets/preview.png"
+    ]
+  }
+}
