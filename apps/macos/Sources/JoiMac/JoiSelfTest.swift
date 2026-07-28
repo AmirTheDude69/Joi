@@ -482,15 +482,21 @@ enum JoiSelfTest {
             "Arc JavaScript results are normalized before command and playback decisions",
             failures: &failures
         )
-        var arcScriptCompileError: NSDictionary?
-        let arcScriptCompiled = MusicController.arcSpotifyAppleScript(for: .favorite)
-            .flatMap(NSAppleScript.init(source:))?
-            .compileAndReturnError(&arcScriptCompileError) == true
-        check(
-            arcScriptCompiled && arcScriptCompileError == nil,
-            "Arc Spotify automation script compiles without executing",
-            failures: &failures
-        )
+        if NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: "company.thebrowser.Browser"
+        ) != nil {
+            var arcScriptCompileError: NSDictionary?
+            let arcScriptCompiled = MusicController.arcSpotifyAppleScript(for: .favorite)
+                .flatMap(NSAppleScript.init(source:))?
+                .compileAndReturnError(&arcScriptCompileError) == true
+            check(
+                arcScriptCompiled && arcScriptCompileError == nil,
+                "Arc Spotify automation script compiles when Arc is installed",
+                failures: &failures
+            )
+        } else {
+            print("SKIP: Arc Spotify AppleScript compilation (Arc is not installed)")
+        }
 
         let suiteName = "JoiSelfTest-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
