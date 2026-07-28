@@ -84,7 +84,7 @@ Restart Codex and choose **Joi** in the pet selector. The default destination is
 See the [plugin walkthrough](plugins/joi-assistant/README.md). The short version for a merged public release is:
 
 ```bash
-codex plugin marketplace add AmirTheDude69/Joi --ref main
+codex plugin marketplace add TheDudeCommits/Joi --ref main
 codex plugin add joi-assistant@joi
 ```
 
