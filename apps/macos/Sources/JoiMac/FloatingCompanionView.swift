@@ -273,6 +273,7 @@ private struct AnimatedSpriteView: View {
         }
     }
 
+    @MainActor
     private var currentImage: NSImage? {
         if let lookDirection {
             return SpriteSheet.shared.frame(row: lookDirection.row, column: lookDirection.column)

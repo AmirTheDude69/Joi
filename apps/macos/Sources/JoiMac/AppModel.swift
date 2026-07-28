@@ -119,7 +119,9 @@ final class AppModel: ObservableObject {
         keychain: KeychainStore = KeychainStore(),
         pomodoro: PomodoroTimer? = nil,
         music: MusicController? = nil,
-        openChatGPTVoice: @escaping @MainActor () -> Bool = ChatGPTVoiceLauncher.open
+        openChatGPTVoice: @escaping @MainActor () -> Bool = { @MainActor in
+            ChatGPTVoiceLauncher.open()
+        }
     ) {
         let storedMinutes = defaults.object(forKey: Keys.pomodoroMinutes) as? Int ?? 25
         let storedScale = defaults.object(forKey: Keys.avatarScale) as? Double
