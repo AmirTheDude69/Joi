@@ -13,7 +13,7 @@
   "dependencies": {
     "@joi/contracts": "workspace:*",
     "@joi/core": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@openai/agents": "^0.13.1",
     "cors": "^2.8.5",
     "dotenv": "^17.0.0",
@@ -23,6 +23,6 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.0",
-    "tsx": "^4.20.0"
+    "tsx": "^4.23.1"
   }
 }

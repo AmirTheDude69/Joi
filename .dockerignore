@@ -1,0 +1,17 @@
+.git
+.github
+.gitignore
+.env
+.env.*
+!.env.example
+node_modules
+.pnpm-store
+.turbo
+**/.next
+**/dist
+coverage
+*.log
+.DS_Store
+apps/macos/.build
+apps/macos/.build-*
+apps/macos/.icon-build

@@ -5,11 +5,17 @@ on:
     branches: [main, "codex/**"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   native-checks:
     runs-on: macos-14
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Build native app
         run: swift build --package-path apps/macos
       - name: Run native self-test
