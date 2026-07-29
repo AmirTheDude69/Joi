@@ -1,0 +1,33 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      npm-security-and-maintenance:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions-security-and-maintenance:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directories:
+      - /apps/agent
+      - /apps/web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      container-security-and-maintenance:
+        patterns:
+          - "*"

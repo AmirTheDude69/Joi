@@ -8,12 +8,15 @@ COPY packages/core/package.json packages/core/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/agent apps/agent
 COPY packages packages
-RUN pnpm --filter @joi/contracts build && pnpm --filter @joi/core build && pnpm --filter @joi/agent build
+RUN pnpm --filter @joi/contracts build \
+    && pnpm --filter @joi/core build \
+    && pnpm --filter @joi/agent build \
+    && pnpm --filter @joi/agent deploy --prod --legacy /prod/agent
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production PORT=8787
-RUN corepack enable
-COPY --from=build /app /app
+COPY --from=build --chown=node:node /prod/agent ./
+USER node
 EXPOSE 8787
-CMD ["pnpm", "--filter", "@joi/agent", "start"]
+CMD ["node", "dist/server.js"]
