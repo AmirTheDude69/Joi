@@ -2,6 +2,11 @@ packages:
   - "apps/*"
   - "packages/*"
 
+minimumReleaseAge: 1440
+trustPolicy: no-downgrade
+trustPolicyIgnoreAfter: 10080
+blockExoticSubdeps: true
+
 onlyBuiltDependencies:
   - "@next/swc-darwin-arm64"
   - "esbuild"
